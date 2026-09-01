@@ -1,3 +1,5 @@
+use tracing::{error, warn};
+
 struct InternalMemory {
     bios: Vec<u8>, // 16Kb      0x00000000 - 0x00003FFF
     // unused ~32Mb     0x00004000 - 0x01FFFFFF
@@ -71,4 +73,74 @@ impl GBAMemory {
             external: ExternalMemory::new(rom_data),
         }
     }
+
+    // TODO: UNUSED MEMORY READ/WRITE SPECIAL CASE FUNCTION
+
+    pub fn read8(&mut self, addr: u32) -> u8 {
+        let mut result: u8 = 0;
+
+        match addr {
+            // Internal Memory
+            0x00000000..=0x04FFFFFF => match addr {
+                // EDGECASE
+                0x00000000..=0x00003FFF => {
+                    match self.internal.bios.get((addr - 0x00000000) as usize) {
+                        Some(value) => result = *value,
+                        None => error!("Couldn't read addr {:x?} from BIOS", addr),
+                    }
+                }
+
+                0x02000000..=0x02FFFFFF => {
+                    match self.internal.wram_on_board.get(
+                        ((addr - 0x02000000) % self.internal.wram_on_board.len() as u32) as usize,
+                    ) {
+                        Some(value) => result = *value,
+                        None => error!("Couldn't read addr {:x?} from On-Board WRAM", addr),
+                    }
+                }
+
+                0x03000000..=0x03FFFFFF => {
+                    match self.internal.wram_on_chip.get(
+                        ((addr - 0x03000000) % self.internal.wram_on_chip.len() as u32) as usize,
+                    ) {
+                        Some(value) => result = *value,
+                        None => error!("Couldn't read addr {:x?} from On-Chip WRAM", addr),
+                    }
+                }
+
+                // EDGECASE
+                0x04000000..=0x040003FE => {
+                    match self.internal.io_registers.get((addr - 0x04000000) as usize) {
+                        Some(value) => result = *value,
+                        None => error!("Couldn't read addr {:x?} from I/O Registers", addr),
+                    }
+                }
+
+                // Unused Memory Areas
+                0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
+                    warn!("Accessing unused memory addr: {:x?}", addr);
+                    // TODO: IMPLEMENT SPECIAL CASE
+                }
+
+                _ => {
+                    result = 0;
+                    error!("Couldn't read addr {:x?} from internal memory", addr)
+                }
+            },
+
+            // Display Memory
+            0x05000000..=0x07FFFFFF => {}
+
+            // External Memory
+            0x08000000..=0x0FFFFFFF => {}
+
+            _ => {}
+        }
+
+        result
+    }
+
+    pub fn read16(addr: u32) -> u16 {}
+
+    pub fn read32(addr: u32) -> u16 {}
 }
