@@ -116,20 +116,64 @@ impl GBAMemory {
                     }
                 }
 
-                // Unused Memory Areas
+                // Unused Mem Areas
                 0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
                     warn!("Accessing unused memory addr: {:x?}", addr);
                     // TODO: IMPLEMENT SPECIAL CASE
                 }
 
                 _ => {
-                    result = 0;
                     error!("Couldn't read addr {:x?} from internal memory", addr)
                 }
             },
 
             // Display Memory
-            0x05000000..=0x07FFFFFF => {}
+            0x05000000..=0x07FFFFFF => {
+                match addr {
+                    // BG / OBJ Palette RAM
+                    0x05000000..=0x05FFFFFF => {
+                        match self.display.palette_ram.get(
+                            ((addr - 0x05000000) % self.display.palette_ram.len() as u32) as usize,
+                        ) {
+                            Some(value) => result = *value,
+                            None => {
+                                error!("Couldn't read addr {:x?} from BG / OBJ Palette RAM", addr)
+                            }
+                        }
+                    }
+
+                    // VRAM
+                    0x06000000..=0x06FFFFFF => {
+                        let mirrored = (addr - 0x06000000) % (128 * 1024);
+                        let final_offset = if mirrored >= 96 * 1024 {
+                            mirrored - 32 * 1024
+                        } else {
+                            mirrored
+                        };
+
+                        match self.display.vram.get(final_offset as usize) {
+                            Some(value) => result = *value,
+                            None => error!("Couln't read addr {:x?} from VRAM", addr),
+                        }
+                    }
+
+                    // OAM
+                    0x07000000..=0x07FFFFFF => {
+                        match self
+                            .display
+                            .oam
+                            .get(((addr - 0x07000000) % self.display.oam.len() as u32) as usize)
+                        {
+                            Some(value) => result = *value,
+                            None => error!("Couldn't read addr {:x?} from OAM", addr),
+                        }
+                    }
+
+                    _ => {
+                        error!("Couldn't read addr {:x?} from display memory", addr)
+                    }
+                }
+            }
 
             // External Memory
             0x08000000..=0x0FFFFFFF => {}
