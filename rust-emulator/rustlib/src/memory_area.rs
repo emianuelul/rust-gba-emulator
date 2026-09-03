@@ -433,3 +433,137 @@ impl GBAMemory {
 }
 
 // MEMORY WRITES
+
+impl InternalMemory {
+    fn write8(&mut self, addr: u32, data: u8) -> u32 {
+        let clk: u32 = 0;
+        match addr {
+            // EDGECASE
+            0x00000000..=0x00003FFF => {
+                warn!(
+                    "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
+                    addr, data
+                );
+                // let index = addr as usize;
+                // self.bios[index] = data;
+            }
+
+            0x02000000..=0x02FFFFFF => {
+                let index = ((addr - 0x02000000) % self.wram_on_board.len() as u32) as usize;
+                self.wram_on_board[index] = data;
+            }
+
+            0x03000000..=0x03FFFFFF => {
+                let index = ((addr - 0x03000000) % self.wram_on_chip.len() as u32) as usize;
+                self.wram_on_chip[index] = data;
+            }
+
+            // EDGECASE
+            0x04000000..=0x040003FE => {
+                let index = (addr - 0x04000000) as usize;
+                self.io_registers[index] = data;
+            }
+
+            // Unused Mem Areas
+            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
+                warn!("Accessing unused memory addr: {:x?}", addr);
+                // TODO: IMPLEMENT SPECIAL CASE
+            }
+
+            _ => {
+                error!("Couldn't write to addr {:x?} from internal memory", addr)
+            }
+        }
+        clk
+    }
+
+    fn write16(&mut self, addr: u32, data: u16) -> u32 {
+        let clk: u32 = 0;
+        //match addr {
+        //    // EDGECASE
+        //    0x00000000..=0x00003FFF => {
+        //        warn!(
+        //            "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
+        //            addr, data
+        //        );
+        //        // let index = addr as usize;
+        //        // self.bios[index] = data;
+        //    }
+        //
+        //    0x02000000..=0x02FFFFFF => {
+        //        // clk = 0
+        //    }
+        //
+        //    0x03000000..=0x03FFFFFF => {
+        //        // clk = 0
+        //    }
+        //
+        //    // EDGECASE
+        //    0x04000000..=0x040003FE => {
+        //        // clk = 0
+        //    }
+        //
+        //    // Unused Mem Areas
+        //    0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
+        //        warn!("Accessing unused memory addr: {:x?}", addr);
+        //        // TODO: IMPLEMENT SPECIAL CASE
+        //    }
+        //
+        //    _ => {
+        //        error!("Couldn't write to addr {:x?} from internal memory", addr)
+        //    }
+        //}
+
+        let bytes = data.to_le_bytes();
+        self.write8(addr, bytes[0]);
+        self.write8(addr + 1, bytes[1]);
+
+        clk
+    }
+
+    fn write32(&mut self, addr: u32, data: u32) -> u32 {
+        let clk: u32 = 0;
+        //match addr {
+        //    // EDGECASE
+        //    0x00000000..=0x00003FFF => {
+        //        warn!(
+        //            "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
+        //            addr, data
+        //        );
+        //        // let index = addr as usize;
+        //        // self.bios[index] = data;
+        //    }
+        //
+        //    0x02000000..=0x02FFFFFF => {
+        //        // clk = 0
+        //    }
+        //
+        //    0x03000000..=0x03FFFFFF => {
+        //        // clk = 0
+        //    }
+        //
+        //    // EDGECASE
+        //    0x04000000..=0x040003FE => {
+        //        // clk = 0
+        //    }
+        //
+        //    // Unused Mem Areas
+        //    0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
+        //        warn!("Accessing unused memory addr: {:x?}", addr);
+        //        // TODO: IMPLEMENT SPECIAL CASE
+        //    }
+        //
+        //    _ => {
+        //        error!("Couldn't write to addr {:x?} from internal memory", addr)
+        //    }
+        //}
+
+        let bytes = data.to_le_bytes();
+        self.write8(addr, bytes[0]);
+        self.write8(addr + 1, bytes[1]);
+        self.write8(addr + 2, bytes[2]);
+        self.write8(addr + 3, bytes[3]);
+
+        clk
+    }
+}
