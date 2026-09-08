@@ -32,6 +32,7 @@ pub struct GBAMemory {
     internal: InternalMemory,
     display: DisplayMemory,
     external: ExternalMemory,
+    last_access: u32,
     // unused 0x10000000 - 0xFFFFFFFF
 }
 
@@ -76,15 +77,18 @@ impl GBAMemory {
 
 // MEMORY READS
 impl InternalMemory {
-    fn read8(&self, addr: u32) -> u8 {
+    fn read8(&self, addr: u32) -> (u8, u32) {
         let mut data: u8 = 0;
-        // let clk
+        let mut clk: u32 = 0;
         match addr {
             // EDGECASE
             0x00000000..=0x00003FFF => {
                 let index = addr as usize;
                 match self.bios.get(index) {
-                    Some(&value) => data = value,
+                    Some(&value) => {
+                        data = value;
+                        clk = 1;
+                    }
                     None => error!("Couldn't read addr {:x?} from BIOS", addr),
                 }
             }
@@ -92,7 +96,10 @@ impl InternalMemory {
             0x02000000..=0x02FFFFFF => {
                 let index = ((addr - 0x02000000) % self.wram_on_board.len() as u32) as usize;
                 match self.wram_on_board.get(index) {
-                    Some(&value) => data = value,
+                    Some(&value) => {
+                        data = value;
+                        clk = 3; // TODO: COME BACK AFTER WAITCNT
+                    }
                     None => error!("Couldn't read addr {:x?} from On-Board WRAM", addr),
                 }
             }
@@ -100,7 +107,10 @@ impl InternalMemory {
             0x03000000..=0x03FFFFFF => {
                 let index = ((addr - 0x03000000) % self.wram_on_chip.len() as u32) as usize;
                 match self.wram_on_chip.get(index) {
-                    Some(&value) => data = value,
+                    Some(&value) => {
+                        data = value;
+                        clk = 1;
+                    }
                     None => error!("Couldn't read addr {:x?} from On-Chip WRAM", addr),
                 }
             }
@@ -109,7 +119,10 @@ impl InternalMemory {
             0x04000000..=0x040003FE => {
                 let index = (addr - 0x04000000) as usize;
                 match self.io_registers.get(index) {
-                    Some(&value) => data = value,
+                    Some(&value) => {
+                        data = value;
+                        clk = 1;
+                    }
                     None => error!("Couldn't read addr {:x?} from I/O Registers", addr),
                 }
             }
@@ -124,89 +137,105 @@ impl InternalMemory {
                 error!("Couldn't read addr {:x?} from internal memory", addr)
             }
         }
-        data
+
+        (data, clk)
     }
 
-    fn read16(&self, addr: u32) -> u16 {
-        let first = self.read8(addr) as u16;
-        let second = self.read8(addr + 1) as u16;
+    fn read16(&self, addr: u32) -> (u16, u32) {
+        let first = self.read8(addr).0 as u16;
+        let second = self.read8(addr + 1).0 as u16;
 
-        first | (second << 8)
+        let mut clk: u32 = 0;
+        match addr {
+            // bios
+            0x00000000..=0x00003FFF => {
+                clk = 1;
+            }
 
-        // let clk
-        //match addr {
-        //    // bios
-        //    0x00000000..=0x00003FFF => {
-        //    }
-        //
-        //    // wram onboard
-        //    0x02000000..=0x02FFFFFF => {
-        //    }
-        //
-        //    // wram onchip
-        //    0x03000000..=0x03FFFFFF => {
-        //    }
-        //
-        //    // io registers
-        //    0x04000000..=0x040003FE => {
-        //    }
-        //
-        //    // Unused Mem Areas
-        //    0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
-        //        warn!("Accessing unused memory addr: {:x?}", addr);
-        //        // TODO: IMPLEMENT SPECIAL CASE
-        //    }
-        //
-        //    _ => {
-        //        error!("Couldn't read addr {:x?} from internal memory", addr)
-        //    }
-        //}
+            // wram onboard
+            0x02000000..=0x02FFFFFF => {
+                clk = 3;
+                // TODO: revisit after waitcnt
+            }
+
+            // wram onchip
+            0x03000000..=0x03FFFFFF => {
+                clk = 1;
+            }
+
+            // io registers
+            0x04000000..=0x040003FE => {
+                clk = 1;
+            }
+
+            // Unused Mem Areas
+            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
+                warn!("Accessing unused memory addr: {:x?}", addr);
+                // TODO: unused memory special case
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from internal memory", addr)
+            }
+        }
+
+        (first | (second << 8), clk)
     }
 
-    fn read32(&self, addr: u32) -> u32 {
-        let first = self.read16(addr) as u32;
-        let second = self.read16(addr + 2) as u32;
+    fn read32(&self, addr: u32) -> (u32, u32) {
+        let first = self.read16(addr).0 as u32;
+        let second = self.read16(addr + 2).0 as u32;
 
-        // let clk
-        //match addr {
-        //    // EDGECASE
-        //    0x00000000..=0x00003FFF => {
-        //    }
-        //
-        //    0x02000000..=0x02FFFFFF => {
-        //    }
-        //
-        //    0x03000000..=0x03FFFFFF => {
-        //    }
-        //
-        //    // EDGECASE
-        //    0x04000000..=0x040003FE => {
-        //    }
-        //
-        //    // Unused Mem Areas
-        //    0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
-        //        warn!("Accessing unused memory addr: {:x?}", addr);
-        //        // TODO: IMPLEMENT SPECIAL CASE
-        //    }
-        //
-        //    _ => {
-        //        error!("Couldn't read addr {:x?} from internal memory", addr)
-        //    }
-        //}
+        let mut clk: u32 = 0;
+        match addr {
+            // EDGECASE
+            0x00000000..=0x00003FFF => {
+                clk = 1;
+            }
 
-        first | (second << 16)
+            0x02000000..=0x02FFFFFF => {
+                clk = 6;
+                // TODO: revisit after waitcnt
+            }
+
+            0x03000000..=0x03FFFFFF => {
+                clk = 1;
+            }
+
+            // EDGECASE
+            0x04000000..=0x040003FE => {
+                clk = 1;
+            }
+
+            // Unused Mem Areas
+            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
+                warn!("Accessing unused memory addr: {:x?}", addr);
+                // TODO: unused memory special case
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from internal memory", addr)
+            }
+        }
+
+        (first | (second << 16), clk)
     }
 }
 
+// TODO: revisit after ppu (+1 clk if memory is accessed during rendering)
 impl DisplayMemory {
-    fn read8(&self, addr: u32) -> u8 {
+    fn read8(&self, addr: u32) -> (u8, u32) {
         let mut data: u8 = 0;
+        let mut clk: u32 = 0;
 
         match addr {
             0x05000000..=0x05FFFFFF => {
                 let index = ((addr - 0x05000000) % self.palette_ram.len() as u32) as usize;
                 match self.palette_ram.get(index) {
-                    Some(&value) => data = value,
+                    Some(&value) => {
+                        data = value;
+                        clk = 1;
+                    }
                     None => {
                         error!("Couldn't read addr {:x?} from BG / OBJ Palette RAM", addr)
                     }
@@ -222,7 +251,10 @@ impl DisplayMemory {
                 };
 
                 match self.vram.get(index) {
-                    Some(&value) => data = value,
+                    Some(&value) => {
+                        data = value;
+                        clk = 1;
+                    }
                     None => error!("Couln't read addr {:x?} from VRAM", addr),
                 }
             }
@@ -230,7 +262,10 @@ impl DisplayMemory {
             0x07000000..=0x07FFFFFF => {
                 let index = ((addr - 0x07000000) % self.oam.len() as u32) as usize;
                 match self.oam.get(index) {
-                    Some(&value) => data = value,
+                    Some(&value) => {
+                        data = value;
+                        clk = 1;
+                    }
                     None => error!("Couldn't read addr {:x?} from OAM", addr),
                 }
             }
@@ -239,71 +274,83 @@ impl DisplayMemory {
                 error!("Couldn't read addr {:x?} from display memory", addr)
             }
         }
-        data
+        (data, clk)
     }
 
-    fn read16(&self, addr: u32) -> u16 {
-        let first = self.read8(addr) as u16;
-        let second = self.read8(addr + 1) as u16;
+    fn read16(&self, addr: u32) -> (u16, u32) {
+        let first = self.read8(addr).0 as u16;
+        let second = self.read8(addr + 1).0 as u16;
 
-        // let CLOCK
-        //match addr {
-        //    // bg obj palette ram
-        //    0x05000000..=0x05FFFFFF => {
-        //    }
-        //
-        //    // vram
-        //    0x06000000..=0x06FFFFFF => {
-        //    }
-        //
-        //    // oam
-        //    0x07000000..=0x07FFFFFF => {
-        //    }
-        //
-        //    _ => {
-        //        error!("Couldn't read addr {:x?} from display memory", addr)
-        //    }
-        //}
+        let mut clk: u32 = 0;
+        match addr {
+            // bg obj palette ram
+            0x05000000..=0x05FFFFFF => {
+                clk = 1;
+            }
 
-        first | (second << 8)
+            // vram
+            0x06000000..=0x06FFFFFF => {
+                clk = 1;
+            }
+
+            // oam
+            0x07000000..=0x07FFFFFF => {
+                clk = 1;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from display memory", addr)
+            }
+        }
+
+        (first | (second << 8), clk)
     }
 
-    fn read32(&self, addr: u32) -> u32 {
-        let first = self.read16(addr) as u32;
-        let second = self.read16(addr + 2) as u32;
+    fn read32(&self, addr: u32) -> (u32, u32) {
+        let first = self.read16(addr).0 as u32;
+        let second = self.read16(addr + 2).0 as u32;
 
-        // let CLOCK
-        //match addr {
-        //    // bg obj palette ram
-        //    0x05000000..=0x05FFFFFF => {
-        //    }
-        //
-        //    // vram
-        //    0x06000000..=0x06FFFFFF => {
-        //    }
-        //
-        //    // oam
-        //    0x07000000..=0x07FFFFFF => {
-        //    }
-        //
-        //    _ => {
-        //        error!("Couldn't read addr {:x?} from display memory", addr)
-        //    }
-        //}
+        let mut clk: u32 = 0;
+        match addr {
+            // bg obj palette ram
+            0x05000000..=0x05FFFFFF => {
+                clk = 2;
+            }
 
-        first | (second << 16)
+            // vram
+            0x06000000..=0x06FFFFFF => {
+                clk = 2;
+            }
+
+            // oam
+            0x07000000..=0x07FFFFFF => {
+                clk = 1;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from display memory", addr)
+            }
+        }
+
+        (first | (second << 16), clk)
     }
 }
 
+// TODO: revisit rom memory after waitcnt
 impl ExternalMemory {
-    fn read8(&self, addr: u32) -> u8 {
+    fn read8(&self, addr: u32) -> (u8, u32) {
         let mut data: u8 = 0;
+        let mut clk: u32 = 0;
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
                 let index = ((addr - 0x08000000) % self.rom.len() as u32) as usize;
                 match self.rom.get(index) {
-                    Some(&value) => data = value,
+                    Some(&value) => {
+                        // let wait = ((addr - 0x08000000) / self.rom.len() as u32) as usize;
+                        data = value;
+                        clk = 2;
+                    }
                     None => error!("Couldn't read addr {:x?} from GamePak ROM", addr),
                 }
             }
@@ -311,7 +358,10 @@ impl ExternalMemory {
             0x0E000000..=0x0FFFFFFF => {
                 let index = ((addr - 0x0E000000) % self.sram.len() as u32) as usize;
                 match self.sram.get(index) {
-                    Some(&value) => data = value,
+                    Some(&value) => {
+                        data = value;
+                        clk = 8;
+                    }
                     None => error!("Couldn't read addr {:x?} from GamePak SRAM", addr),
                 }
             }
@@ -321,59 +371,63 @@ impl ExternalMemory {
             }
         }
 
-        data
+        (data, clk)
     }
 
-    fn read16(&self, addr: u32) -> u16 {
-        let first = self.read8(addr) as u16;
-        let second = self.read8(addr + 1) as u16;
+    fn read16(&self, addr: u32) -> (u16, u32) {
+        let first = self.read8(addr).0 as u16;
+        let second = self.read8(addr + 1).0 as u16;
 
-        // let clk
-        //match addr {
-        //    0x08000000..=0x0DFFFFFF => {
-        //       // let wait: usize = addr as usize / self.external.rom.len();
-        //    }
-        //
-        //    0x0E000000..=0x0FFFFFFF => {
-        //    }
-        //
-        //    _ => {
-        //        error!("Couldn't read addr {:x?} from external memory", addr)
-        //    }
-        //}
+        let mut clk: u32 = 0;
+        match addr {
+            0x08000000..=0x0DFFFFFF => {
+                // let wait: usize = ((addr - 0x08000000) / self.external.rom.len() as u32) as usize;
+                clk = 3;
+            }
 
-        first | (second << 8)
+            0x0E000000..=0x0FFFFFFF => {
+                warn!("Reading 16bit value from FLASH memory");
+                clk = 8;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from external memory", addr)
+            }
+        }
+
+        (first | (second << 8), clk)
     }
 
-    fn read32(&self, addr: u32) -> u32 {
-        let first = self.read16(addr) as u32;
-        let second = self.read16(addr + 2) as u32;
+    fn read32(&self, addr: u32) -> (u32, u32) {
+        let first = self.read16(addr).0 as u32;
+        let second = self.read16(addr + 2).0 as u32;
 
-        // let clk
-        //match addr {
-        //    0x08000000..=0x0DFFFFFF => {
-        //       // let wait: usize = addr as usize / self.external.rom.len();
-        //    }
-        //
-        //    0x0E000000..=0x0FFFFFFF => {
-        //    }
-        //
-        //    _ => {
-        //        error!("Couldn't read addr {:x?} from external memory", addr)
-        //    }
-        //}
+        let mut clk: u32 = 0;
+        match addr {
+            0x08000000..=0x0DFFFFFF => {
+                // let wait: usize = ((addr - 0x08000000) / self.external.rom.len() as u32) as usize;
+                clk = 3;
+            }
 
-        first | (second << 16)
+            0x0E000000..=0x0FFFFFFF => {
+                warn!("Reading 32bit value from FLASH memory");
+                clk = 8;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from external memory", addr)
+            }
+        }
+
+        (first | (second << 16), clk)
     }
 }
 
 impl GBAMemory {
     // TODO: UNUSED MEMORY READ/WRITE SPECIAL CASE FUNCTION
 
-    // TODO: IMPLEMENT CLOCK TIME TRACKING
-    pub fn read8(&self, addr: u32) -> u8 {
-        let mut data: u8 = 0;
-        // let mut clk: u8 = 0;
+    pub fn read8(&self, addr: u32) -> (u8, u32) {
+        let mut data: (u8, u32) = (0, 0);
 
         match addr {
             0x00000000..=0x04FFFFFF => data = self.internal.read8(addr),
@@ -391,9 +445,8 @@ impl GBAMemory {
         data
     }
 
-    pub fn read16(&self, addr: u32) -> u16 {
-        let mut data: u16 = 0;
-        // let mut clk: u32 = 0;
+    pub fn read16(&self, addr: u32) -> (u16, u32) {
+        let mut data: (u16, u32) = (0, 0);
 
         match addr {
             0x00000000..=0x04FFFFFF => data = self.internal.read16(addr),
@@ -411,9 +464,8 @@ impl GBAMemory {
         data
     }
 
-    pub fn read32(&self, addr: u32) -> u32 {
-        let mut data: u32 = 0;
-        // let mut clk: u32 = 0;
+    pub fn read32(&self, addr: u32) -> (u32, u32) {
+        let mut data: (u32, u32) = (0, 0);
 
         match addr {
             0x00000000..=0x04FFFFFF => data = self.internal.read32(addr),
@@ -563,6 +615,249 @@ impl InternalMemory {
         self.write8(addr + 1, bytes[1]);
         self.write8(addr + 2, bytes[2]);
         self.write8(addr + 3, bytes[3]);
+
+        clk
+    }
+}
+
+impl DisplayMemory {
+    fn write8(&mut self, addr: u32, data: u8) -> u32 {
+        let mut clk: u32 = 0;
+
+        match addr {
+            0x05000000..=0x05FFFFFF => {
+                let index = ((addr - 0x05000000) % self.palette_ram.len() as u32) as usize;
+                self.palette_ram[index] = data;
+
+                clk = 0;
+            }
+
+            0x06000000..=0x06FFFFFF => {
+                let mirrored = (addr - 0x06000000) % (128 * 1024);
+                let index = if mirrored >= 96 * 1024 {
+                    (mirrored - 32 * 1024) as usize
+                } else {
+                    mirrored as usize
+                };
+
+                self.vram[index] = data;
+
+                clk = 0;
+            }
+
+            0x07000000..=0x07FFFFFF => {
+                let index = ((addr - 0x07000000) % self.oam.len() as u32) as usize;
+                self.oam[index] = data;
+
+                clk = 0;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from display memory", addr)
+            }
+        }
+        clk
+    }
+
+    fn write16(&mut self, addr: u32, data: u16) -> u32 {
+        let mut clk: u32 = 0;
+
+        match addr {
+            // bg obj palette ram
+            0x05000000..=0x05FFFFFF => {
+                clk = 0;
+            }
+
+            // vram
+            0x06000000..=0x06FFFFFF => {
+                clk = 0;
+            }
+
+            // oam
+            0x07000000..=0x07FFFFFF => {
+                clk = 0;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from display memory", addr)
+            }
+        }
+
+        let bytes = data.to_le_bytes();
+        self.write8(addr, bytes[0]);
+        self.write8(addr + 1, bytes[1]);
+
+        clk
+    }
+
+    fn write32(&mut self, addr: u32, data: u32) -> u32 {
+        let mut clk: u32 = 0;
+
+        match addr {
+            // bg obj palette ram
+            0x05000000..=0x05FFFFFF => {
+                clk = 0;
+            }
+
+            // vram
+            0x06000000..=0x06FFFFFF => {
+                clk = 0;
+            }
+
+            // oam
+            0x07000000..=0x07FFFFFF => {
+                clk = 0;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from display memory", addr)
+            }
+        }
+
+        let bytes = data.to_le_bytes();
+        self.write8(addr, bytes[0]);
+        self.write8(addr + 1, bytes[1]);
+        self.write8(addr + 2, bytes[2]);
+        self.write8(addr + 3, bytes[3]);
+
+        clk
+    }
+}
+
+impl ExternalMemory {
+    fn write8(&mut self, addr: u32, data: u8) -> u32 {
+        let mut clk: u32 = 0;
+
+        match addr {
+            0x08000000..=0x0DFFFFFF => {
+                let index = ((addr - 0x08000000) % self.rom.len() as u32) as usize;
+                self.rom[index] = data;
+
+                clk = 0;
+            }
+
+            0x0E000000..=0x0FFFFFFF => {
+                let index = ((addr - 0x0E000000) % self.sram.len() as u32) as usize;
+                self.sram[index] = data;
+
+                clk = 0;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from external memory", addr)
+            }
+        }
+
+        clk
+    }
+
+    fn write16(&mut self, addr: u32, data: u16) -> u32 {
+        let mut clk: u32 = 0;
+
+        match addr {
+            0x08000000..=0x0DFFFFFF => {
+                // let wait: usize = addr as usize / self.external.rom.len();
+                clk = 0;
+            }
+
+            0x0E000000..=0x0FFFFFFF => {
+                clk = 0;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from external memory", addr)
+            }
+        }
+
+        let bytes = data.to_le_bytes();
+        self.write8(addr, bytes[0]);
+        self.write8(addr + 1, bytes[1]);
+
+        clk
+    }
+
+    fn write32(&mut self, addr: u32, data: u32) -> u32 {
+        let mut clk: u32 = 0;
+
+        match addr {
+            0x08000000..=0x0DFFFFFF => {
+                // let wait: usize = addr as usize / self.external.rom.len();
+                clk = 0;
+            }
+
+            0x0E000000..=0x0FFFFFFF => {
+                clk = 0;
+            }
+
+            _ => {
+                error!("Couldn't read addr {:x?} from external memory", addr)
+            }
+        }
+
+        let bytes = data.to_le_bytes();
+        self.write8(addr, bytes[0]);
+        self.write8(addr + 1, bytes[1]);
+        self.write8(addr + 2, bytes[2]);
+        self.write8(addr + 3, bytes[3]);
+
+        clk
+    }
+}
+
+impl GBAMemory {
+    pub fn write8(&mut self, addr: u32, data: u8) -> u32 {
+        let mut clk: u32 = 0;
+
+        match addr {
+            0x00000000..=0x04FFFFFF => clk = self.internal.write8(addr, data),
+
+            0x05000000..=0x07FFFFFF => clk = self.display.write8(addr, data),
+
+            0x08000000..=0x0FFFFFFF => clk = self.external.write8(addr, data),
+
+            _ => error!(
+                "Couldn't read 8bit value from addr {:x?} from anywhere in memory",
+                addr
+            ),
+        }
+
+        clk
+    }
+
+    pub fn write16(&mut self, addr: u32, data: u16) -> u32 {
+        let mut clk: u32 = 0;
+
+        match addr {
+            0x00000000..=0x04FFFFFF => clk = self.internal.write16(addr, data),
+
+            0x05000000..=0x07FFFFFF => clk = self.display.write16(addr, data),
+
+            0x08000000..=0x0FFFFFFF => clk = self.external.write16(addr, data),
+
+            _ => error!(
+                "Couldn't read 8bit value from addr {:x?} from anywhere in memory",
+                addr
+            ),
+        }
+
+        clk
+    }
+
+    pub fn write32(&mut self, addr: u32, data: u32) -> u32 {
+        let mut clk: u32 = 0;
+
+        match addr {
+            0x00000000..=0x04FFFFFF => clk = self.internal.write32(addr, data),
+
+            0x05000000..=0x07FFFFFF => clk = self.display.write32(addr, data),
+
+            0x08000000..=0x0FFFFFFF => clk = self.external.write32(addr, data),
+
+            _ => error!(
+                "Couldn't read 8bit value from addr {:x?} from anywhere in memory",
+                addr
+            ),
+        }
 
         clk
     }
