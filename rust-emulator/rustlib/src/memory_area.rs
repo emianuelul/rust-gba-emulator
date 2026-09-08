@@ -32,6 +32,7 @@ pub struct GBAMemory {
     internal: InternalMemory,
     display: DisplayMemory,
     external: ExternalMemory,
+    // TODO: use once n/s logic exists
     last_access: u32,
     // unused 0x10000000 - 0xFFFFFFFF
 }
@@ -71,6 +72,7 @@ impl GBAMemory {
             internal: InternalMemory::new(),
             display: DisplayMemory::new(),
             external: ExternalMemory::new(rom_data),
+            last_access: 0,
         }
     }
 }
@@ -486,9 +488,10 @@ impl GBAMemory {
 
 // MEMORY WRITES
 
+// TODO: revisit on board wram after waitcnt
 impl InternalMemory {
     fn write8(&mut self, addr: u32, data: u8) -> u32 {
-        let clk: u32 = 0;
+        let mut clk: u32 = 0;
         match addr {
             // EDGECASE
             0x00000000..=0x00003FFF => {
@@ -496,6 +499,7 @@ impl InternalMemory {
                     "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
                     addr, data
                 );
+                clk = 1;
                 // let index = addr as usize;
                 // self.bios[index] = data;
             }
@@ -503,17 +507,20 @@ impl InternalMemory {
             0x02000000..=0x02FFFFFF => {
                 let index = ((addr - 0x02000000) % self.wram_on_board.len() as u32) as usize;
                 self.wram_on_board[index] = data;
+                clk = 3;
             }
 
             0x03000000..=0x03FFFFFF => {
                 let index = ((addr - 0x03000000) % self.wram_on_chip.len() as u32) as usize;
                 self.wram_on_chip[index] = data;
+                clk = 1;
             }
 
             // EDGECASE
             0x04000000..=0x040003FE => {
                 let index = (addr - 0x04000000) as usize;
                 self.io_registers[index] = data;
+                clk = 1;
             }
 
             // Unused Mem Areas
@@ -530,96 +537,99 @@ impl InternalMemory {
     }
 
     fn write16(&mut self, addr: u32, data: u16) -> u32 {
-        let clk: u32 = 0;
-        //match addr {
-        //    // EDGECASE
-        //    0x00000000..=0x00003FFF => {
-        //        warn!(
-        //            "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
-        //            addr, data
-        //        );
-        //        // let index = addr as usize;
-        //        // self.bios[index] = data;
-        //    }
-        //
-        //    0x02000000..=0x02FFFFFF => {
-        //        // clk = 0
-        //    }
-        //
-        //    0x03000000..=0x03FFFFFF => {
-        //        // clk = 0
-        //    }
-        //
-        //    // EDGECASE
-        //    0x04000000..=0x040003FE => {
-        //        // clk = 0
-        //    }
-        //
-        //    // Unused Mem Areas
-        //    0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
-        //        warn!("Accessing unused memory addr: {:x?}", addr);
-        //        // TODO: IMPLEMENT SPECIAL CASE
-        //    }
-        //
-        //    _ => {
-        //        error!("Couldn't write to addr {:x?} from internal memory", addr)
-        //    }
-        //}
+        let mut clk: u32 = 0;
+        match addr {
+            // EDGECASE
+            0x00000000..=0x00003FFF => {
+                warn!(
+                    "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
+                    addr, data
+                );
+                // let index = addr as usize;
+                // self.bios[index] = data;
+                clk = 1;
+            }
+
+            0x02000000..=0x02FFFFFF => {
+                clk = 3;
+            }
+
+            0x03000000..=0x03FFFFFF => {
+                clk = 1;
+            }
+
+            // EDGECASE
+            0x04000000..=0x040003FE => {
+                clk = 1;
+            }
+
+            // Unused Mem Areas
+            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
+                warn!("Accessing unused memory addr: {:x?}", addr);
+                // TODO: IMPLEMENT SPECIAL CASE
+            }
+
+            _ => {
+                error!("Couldn't write to addr {:x?} from internal memory", addr)
+            }
+        }
 
         let bytes = data.to_le_bytes();
-        self.write8(addr, bytes[0]);
-        self.write8(addr + 1, bytes[1]);
+        let _ = self.write8(addr, bytes[0]);
+        let _ = self.write8(addr + 1, bytes[1]);
 
         clk
     }
 
     fn write32(&mut self, addr: u32, data: u32) -> u32 {
-        let clk: u32 = 0;
-        //match addr {
-        //    // EDGECASE
-        //    0x00000000..=0x00003FFF => {
-        //        warn!(
-        //            "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
-        //            addr, data
-        //        );
-        //        // let index = addr as usize;
-        //        // self.bios[index] = data;
-        //    }
-        //
-        //    0x02000000..=0x02FFFFFF => {
-        //        // clk = 0
-        //    }
-        //
-        //    0x03000000..=0x03FFFFFF => {
-        //        // clk = 0
-        //    }
-        //
-        //    // EDGECASE
-        //    0x04000000..=0x040003FE => {
-        //        // clk = 0
-        //    }
-        //
-        //    // Unused Mem Areas
-        //    0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
-        //        warn!("Accessing unused memory addr: {:x?}", addr);
-        //        // TODO: IMPLEMENT SPECIAL CASE
-        //    }
-        //
-        //    _ => {
-        //        error!("Couldn't write to addr {:x?} from internal memory", addr)
-        //    }
-        //}
+        let mut clk: u32 = 0;
+        match addr {
+            // EDGECASE
+            0x00000000..=0x00003FFF => {
+                warn!(
+                    "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
+                    addr, data
+                );
+                // let index = addr as usize;
+                // self.bios[index] = data;
+                clk = 1;
+            }
+
+            0x02000000..=0x02FFFFFF => {
+                clk = 6;
+            }
+
+            0x03000000..=0x03FFFFFF => {
+                clk = 1;
+            }
+
+            // EDGECASE
+            0x04000000..=0x040003FE => {
+                clk = 0;
+            }
+
+            // Unused Mem Areas
+            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
+                warn!("Accessing unused memory addr: {:x?}", addr);
+                // TODO: IMPLEMENT SPECIAL CASE
+            }
+
+            _ => {
+                error!("Couldn't write to addr {:x?} from internal memory", addr)
+            }
+        }
 
         let bytes = data.to_le_bytes();
-        self.write8(addr, bytes[0]);
-        self.write8(addr + 1, bytes[1]);
-        self.write8(addr + 2, bytes[2]);
-        self.write8(addr + 3, bytes[3]);
+        let _ = self.write8(addr, bytes[0]);
+        let _ = self.write8(addr + 1, bytes[1]);
+        let _ = self.write8(addr + 2, bytes[2]);
+        let _ = self.write8(addr + 3, bytes[3]);
 
         clk
     }
 }
 
+// TODO: revisit after ppu (+1 clk if during scanline render)
 impl DisplayMemory {
     fn write8(&mut self, addr: u32, data: u8) -> u32 {
         let mut clk: u32 = 0;
@@ -629,7 +639,7 @@ impl DisplayMemory {
                 let index = ((addr - 0x05000000) % self.palette_ram.len() as u32) as usize;
                 self.palette_ram[index] = data;
 
-                clk = 0;
+                clk = 1;
             }
 
             0x06000000..=0x06FFFFFF => {
@@ -642,14 +652,14 @@ impl DisplayMemory {
 
                 self.vram[index] = data;
 
-                clk = 0;
+                clk = 1;
             }
 
             0x07000000..=0x07FFFFFF => {
                 let index = ((addr - 0x07000000) % self.oam.len() as u32) as usize;
                 self.oam[index] = data;
 
-                clk = 0;
+                clk = 1;
             }
 
             _ => {
@@ -665,17 +675,17 @@ impl DisplayMemory {
         match addr {
             // bg obj palette ram
             0x05000000..=0x05FFFFFF => {
-                clk = 0;
+                clk = 1;
             }
 
             // vram
             0x06000000..=0x06FFFFFF => {
-                clk = 0;
+                clk = 1;
             }
 
             // oam
             0x07000000..=0x07FFFFFF => {
-                clk = 0;
+                clk = 1;
             }
 
             _ => {
@@ -684,8 +694,8 @@ impl DisplayMemory {
         }
 
         let bytes = data.to_le_bytes();
-        self.write8(addr, bytes[0]);
-        self.write8(addr + 1, bytes[1]);
+        let _ = self.write8(addr, bytes[0]);
+        let _ = self.write8(addr + 1, bytes[1]);
 
         clk
     }
@@ -696,17 +706,17 @@ impl DisplayMemory {
         match addr {
             // bg obj palette ram
             0x05000000..=0x05FFFFFF => {
-                clk = 0;
+                clk = 2;
             }
 
             // vram
             0x06000000..=0x06FFFFFF => {
-                clk = 0;
+                clk = 2;
             }
 
             // oam
             0x07000000..=0x07FFFFFF => {
-                clk = 0;
+                clk = 1;
             }
 
             _ => {
@@ -715,32 +725,34 @@ impl DisplayMemory {
         }
 
         let bytes = data.to_le_bytes();
-        self.write8(addr, bytes[0]);
-        self.write8(addr + 1, bytes[1]);
-        self.write8(addr + 2, bytes[2]);
-        self.write8(addr + 3, bytes[3]);
+        let _ = self.write8(addr, bytes[0]);
+        let _ = self.write8(addr + 1, bytes[1]);
+        let _ = self.write8(addr + 2, bytes[2]);
+        let _ = self.write8(addr + 3, bytes[3]);
 
         clk
     }
 }
 
+// TODO: revisit after waitcnt
 impl ExternalMemory {
     fn write8(&mut self, addr: u32, data: u8) -> u32 {
         let mut clk: u32 = 0;
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
+                // let wait = ((addr - 0x08000000) / self.rom.len() as u32) as usize;
                 let index = ((addr - 0x08000000) % self.rom.len() as u32) as usize;
                 self.rom[index] = data;
 
-                clk = 0;
+                clk = 3;
             }
 
             0x0E000000..=0x0FFFFFFF => {
                 let index = ((addr - 0x0E000000) % self.sram.len() as u32) as usize;
                 self.sram[index] = data;
 
-                clk = 0;
+                clk = 8;
             }
 
             _ => {
@@ -757,11 +769,12 @@ impl ExternalMemory {
         match addr {
             0x08000000..=0x0DFFFFFF => {
                 // let wait: usize = addr as usize / self.external.rom.len();
-                clk = 0;
+                clk = 3;
+                return clk;
             }
 
             0x0E000000..=0x0FFFFFFF => {
-                clk = 0;
+                clk = 8;
             }
 
             _ => {
@@ -770,8 +783,8 @@ impl ExternalMemory {
         }
 
         let bytes = data.to_le_bytes();
-        self.write8(addr, bytes[0]);
-        self.write8(addr + 1, bytes[1]);
+        let _ = self.write8(addr, bytes[0]);
+        let _ = self.write8(addr + 1, bytes[1]);
 
         clk
     }
@@ -782,11 +795,13 @@ impl ExternalMemory {
         match addr {
             0x08000000..=0x0DFFFFFF => {
                 // let wait: usize = addr as usize / self.external.rom.len();
-                clk = 0;
+                warn!("Tried to write 32bit value to FLASH memory");
+                clk = 3;
+                return clk;
             }
 
             0x0E000000..=0x0FFFFFFF => {
-                clk = 0;
+                clk = 8;
             }
 
             _ => {
