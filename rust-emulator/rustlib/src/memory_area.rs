@@ -21,8 +21,7 @@ struct DisplayMemory {
 }
 
 struct ExternalMemory {
-    rom: Vec<u8>, // wait0 32Mb      0x08000000 - 0x09FFFFFF
-    // mirrored wait1 32Mb           0x0A000000 - 0x0BFFFFFF
+    rom: Vec<u8>, // wait0 32Mb      0x08000000 - 0x09FFFFFF mirrored wait1 32Mb           0x0A000000 - 0x0BFFFFFF
     // mirrored wait2 32Mb           0x0C000000 - 0x0DFFFFFF
     sram: Vec<u8>, // 64Kb           0x0E000000 - 0x0E00FFFF
                    // unused ~32Mb   0x0E010000 - 0x0FFFFFFF
@@ -75,6 +74,14 @@ impl GBAMemory {
             last_access: 0,
         }
     }
+}
+
+fn align16(addr: u32) -> u32 {
+    addr & !1u32
+}
+
+fn align32(addr: u32) -> u32 {
+    addr & !3u32
 }
 
 // MEMORY READS
@@ -448,6 +455,8 @@ impl GBAMemory {
     }
 
     pub fn read16(&self, addr: u32) -> (u16, u32) {
+        let addr = align16(addr);
+
         let mut data: (u16, u32) = (0, 0);
 
         match addr {
@@ -467,6 +476,8 @@ impl GBAMemory {
     }
 
     pub fn read32(&self, addr: u32) -> (u32, u32) {
+        let addr = align32(addr);
+
         let mut data: (u32, u32) = (0, 0);
 
         match addr {
@@ -729,12 +740,12 @@ impl DisplayMemory {
         let _ = self.write8(addr + 1, bytes[1]);
         let _ = self.write8(addr + 2, bytes[2]);
         let _ = self.write8(addr + 3, bytes[3]);
-
         clk
     }
 }
 
 // TODO: revisit after waitcnt
+// TODO: handle FLASH vs ROM memory writes
 impl ExternalMemory {
     fn write8(&mut self, addr: u32, data: u8) -> u32 {
         let mut clk: u32 = 0;
@@ -742,9 +753,7 @@ impl ExternalMemory {
         match addr {
             0x08000000..=0x0DFFFFFF => {
                 // let wait = ((addr - 0x08000000) / self.rom.len() as u32) as usize;
-                let index = ((addr - 0x08000000) % self.rom.len() as u32) as usize;
-                self.rom[index] = data;
-
+                warn!("Tried to write to ROM memory");
                 clk = 3;
             }
 
@@ -769,6 +778,7 @@ impl ExternalMemory {
         match addr {
             0x08000000..=0x0DFFFFFF => {
                 // let wait: usize = addr as usize / self.external.rom.len();
+                warn!("Tried to write 16bit to ROM memory");
                 clk = 3;
                 return clk;
             }
@@ -795,7 +805,7 @@ impl ExternalMemory {
         match addr {
             0x08000000..=0x0DFFFFFF => {
                 // let wait: usize = addr as usize / self.external.rom.len();
-                warn!("Tried to write 32bit value to FLASH memory");
+                warn!("Tried to write 32bit value to ROM");
                 clk = 3;
                 return clk;
             }
@@ -840,6 +850,8 @@ impl GBAMemory {
     }
 
     pub fn write16(&mut self, addr: u32, data: u16) -> u32 {
+        let addr = align16(addr);
+
         let mut clk: u32 = 0;
 
         match addr {
@@ -859,6 +871,8 @@ impl GBAMemory {
     }
 
     pub fn write32(&mut self, addr: u32, data: u32) -> u32 {
+        let addr = align32(addr);
+
         let mut clk: u32 = 0;
 
         match addr {
