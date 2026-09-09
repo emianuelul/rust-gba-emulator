@@ -1,3 +1,4 @@
+pub mod cpu_module;
 pub mod gba_emulator;
 pub mod memory_area;
 
