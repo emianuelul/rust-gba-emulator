@@ -36,6 +36,7 @@ pub struct GBAMemory {
     // unused 0x10000000 - 0xFFFFFFFF
 }
 
+// INIT
 impl InternalMemory {
     fn new() -> Self {
         InternalMemory {
@@ -46,6 +47,7 @@ impl InternalMemory {
         }
     }
 }
+
 impl DisplayMemory {
     fn new() -> Self {
         DisplayMemory {
@@ -616,7 +618,7 @@ impl InternalMemory {
 
             // EDGECASE
             0x04000000..=0x040003FE => {
-                clk = 0;
+                clk = 1;
             }
 
             // Unused Mem Areas
