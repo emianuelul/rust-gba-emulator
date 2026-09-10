@@ -1,4 +1,5 @@
 use crate::memory_area::GBAMemory;
+use bitmatch::bitmatch;
 use std::collections::HashMap;
 use tracing::{error, warn};
 
@@ -8,7 +9,12 @@ use tracing::{error, warn};
 //   V
 // execute
 
+// TODO: refactor get_register_value and set_register_value to work for THUMB
+
+const SP: usize = 13;
+const LR: usize = 14;
 const PC: usize = 15;
+
 const N_FLAG: usize = 31;
 const Z_FLAG: usize = 30;
 const C_FLAG: usize = 29;
@@ -16,7 +22,7 @@ const V_FLAG: usize = 28;
 
 const IRQ_FLAG: usize = 7;
 const FIQ_FLAG: usize = 6;
-const STATE_FLAG: usize = 5;
+const T_FLAG: usize = 5;
 
 #[derive(Hash, Eq, PartialEq)]
 enum CPUMode {
@@ -134,7 +140,11 @@ impl CPU {
             13..=14 => {
                 let value = self.registers.pointers.get(&curr_mode).unwrap();
 
-                if index == 13 { value.0 } else { value.1 }
+                if index == 13 {
+                    value.0
+                } else {
+                    value.1
+                }
             }
             PC => self.registers.pc,
 
@@ -149,9 +159,7 @@ impl CPU {
 // CPSR Ops
 impl CPU {
     fn get_cpsr_bit(&self, index: usize) -> u8 {
-        let copy = self.cpsr;
-
-        ((copy >> index) & 1) as u8
+        ((self.cpsr >> index) & 1) as u8
     }
 
     fn set_cpsr_bit(&mut self, index: usize, value: bool) {
@@ -163,7 +171,7 @@ impl CPU {
     }
 
     fn get_cpu_state(&self) -> CPUState {
-        if self.get_cpsr_bit(STATE_FLAG) == 0 {
+        if self.get_cpsr_bit(T_FLAG) == 0 {
             CPUState::Arm
         } else {
             CPUState::Thumb
@@ -262,7 +270,15 @@ impl CPU {
 }
 
 // Step Logic
+// TODO: Revisit after waitcnt
 impl CPU {
+    fn convert_u24_to_i32(&self, value: u32) -> i32 {
+        ((value << 8) as i32) >> 8
+    }
+
+    fn execute_alu_op(&mut self, opcode: u8, rn: u8, rd: u8, operand2: u32, s: bool) {}
+
+    #[bitmatch]
     pub fn step(&mut self, memory: &GBAMemory) -> u32 {
         if self.registers.pc >= memory.get_rom_size() as u32 {
             error!(
@@ -272,11 +288,88 @@ impl CPU {
             return 0;
         }
 
-        let clk: u32 = 0;
+        let mut clk: u32 = 0;
 
-        // fetch
         match self.get_cpu_state() {
-            CPUState::Arm => {}
+            CPUState::Arm => {
+                // fetch
+                let (instruction, read) = memory.read32(self.get_register_value(PC));
+                clk += read;
+
+                #[bitmatch]
+                let "cccc_????????????????????????????" = instruction;
+
+                if self.check_condition(c as u8) {
+                    #[bitmatch]
+                    match instruction {
+                        // B
+                        "????_101_0_nnnnnnnnnnnnnnnnnnnnnnnn" => {
+                            self.registers.pc =
+                                (self.registers.pc as i32 + 8 + self.convert_u24_to_i32(n) * 4)
+                                    as u32;
+
+                            // 2S + 1N
+                        }
+
+                        // BL
+                        "????_101_1_nnnnnnnnnnnnnnnnnnnnnnnn" => {
+                            self.set_register_value(LR, self.registers.pc + 4);
+                            self.registers.pc =
+                                (self.registers.pc as i32 + 8 + self.convert_u24_to_i32(n) * 4)
+                                    as u32;
+
+                            // 2S + 1N
+                        }
+
+                        // BX
+                        "????_0001_0010_1111_1111_1111_0001_nnnn" => {
+                            if n == 15 {
+                                self.registers.pc += 8;
+                                // 2S + 1N
+                            }
+
+                            let register_value = self.get_register_value(n as usize);
+
+                            if register_value % 2 == 1 {
+                                self.set_cpsr_bit(T_FLAG, true);
+                                self.registers.pc = register_value & !1;
+                            } else {
+                                self.set_cpsr_bit(T_FLAG, false);
+                                self.registers.pc = register_value & !3;
+                            }
+
+                            // 2S + 1N
+                        }
+
+                        // SWI
+                        "????_1111_nnnnnnnnnnnnnnnnnnnnnnnn" => {
+                            todo!("Revisit after BIOS impl");
+                            // 2S + 1N
+                        }
+
+                        // ALU (I = 1) (ror shift on imm)
+                        "????_00_i_oooo_s_rrrr_dddd_ssss_nnnnnnnn" => {
+                            todo!("op2 is shifted imm");
+                        }
+
+                        // ALU (I = 0, R = 0) (register is shifted by shifted immediate)
+                        "????_00_0_oooo_s_rrrr_dddd_sssss_tt_0_nnnn" => {
+                            todo!("op2 is shifted register shifted by imm")
+                        }
+
+                        // ALU (I = 0, R = 1) (register is shifted by shifted register)
+                        "????_00_0_oooo_s_rrrr_dddd_ssss_0_tt_1_nnnn" => {
+                            todo!("op2 is shifted register shifted by register")
+                        }
+
+                        _ => {
+                            error!("Invalid error detected: {:b}", instruction);
+                        }
+                    }
+                } else {
+                    self.registers.pc += 4;
+                }
+            }
             CPUState::Thumb => {}
         }
 
