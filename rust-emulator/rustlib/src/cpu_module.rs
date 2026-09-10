@@ -35,25 +35,6 @@ enum CPUState {
     Thumb,
 }
 
-enum ConditionCode {
-    EQ,
-    NE,
-    CSHS,
-    CCLO,
-    MI,
-    PL,
-    VS,
-    VC,
-    HI,
-    LS,
-    GE,
-    LT,
-    GT,
-    LE,
-    AL,
-    NV,
-}
-
 // pointers: r13, r14 (SP, LR)
 struct CPURegisters {
     common: Vec<u32>, // r0-r12
@@ -109,6 +90,63 @@ impl Default for CPU {
     }
 }
 
+// Registers I/O
+impl CPU {
+    fn set_register_value(&mut self, index: usize, data: u32) {
+        let curr_mode = self.get_effective_cpu_mode();
+        match index {
+            0..8 => self.registers.common[index] = data,
+            8..=12 => {
+                if curr_mode == CPUMode::Fiq {
+                    self.registers.fiq[index - 8] = data;
+                } else {
+                    self.registers.common[index] = data;
+                }
+            }
+            13..=14 => {
+                let value = self.registers.pointers.get(&curr_mode).unwrap();
+
+                if index == 13 {
+                    self.registers.pointers.insert(curr_mode, (data, value.1));
+                } else {
+                    self.registers.pointers.insert(curr_mode, (value.0, data));
+                }
+            }
+            PC => self.registers.pc = data,
+
+            _ => {
+                error!("CPU Register read index out of bounds: {}", index);
+            }
+        }
+    }
+
+    fn get_register_value(&self, index: usize) -> u32 {
+        let curr_mode = self.get_effective_cpu_mode();
+        match index {
+            0..8 => self.registers.common[index],
+            8..=12 => {
+                if curr_mode == CPUMode::Fiq {
+                    self.registers.fiq[index - 8]
+                } else {
+                    self.registers.common[index]
+                }
+            }
+            13..=14 => {
+                let value = self.registers.pointers.get(&curr_mode).unwrap();
+
+                if index == 13 { value.0 } else { value.1 }
+            }
+            PC => self.registers.pc,
+
+            _ => {
+                error!("CPU Register read index out of bounds: {}", index);
+                0
+            }
+        }
+    }
+}
+
+// CPSR Ops
 impl CPU {
     fn get_cpsr_bit(&self, index: usize) -> u8 {
         let copy = self.cpsr;
@@ -162,59 +200,69 @@ impl CPU {
         }
     }
 
-    fn set_register_value(&mut self, index: usize, data: u32) {
-        let curr_mode = self.get_effective_cpu_mode();
-        match index {
-            0..8 => self.registers.common[index] = data,
-            8..=12 => {
-                if curr_mode == CPUMode::Fiq {
-                    self.registers.fiq[index - 8] = data;
-                } else {
-                    self.registers.common[index] = data;
-                }
-            }
-            13..=14 => {
-                let value = self.registers.pointers.get(&curr_mode).unwrap();
+    fn check_condition(&self, cond_bits: u8) -> bool {
+        let n = self.get_cpsr_bit(N_FLAG);
+        let z = self.get_cpsr_bit(Z_FLAG);
+        let c = self.get_cpsr_bit(C_FLAG);
+        let v = self.get_cpsr_bit(V_FLAG);
 
-                if index == 13 {
-                    self.registers.pointers.insert(curr_mode, (data, value.1));
-                } else {
-                    self.registers.pointers.insert(curr_mode, (value.0, data));
-                }
-            }
-            PC => self.registers.pc = data,
+        match cond_bits {
+            // EQ
+            0x0 => z == 1,
 
+            // NE
+            0x1 => z == 0,
+
+            // CS/HS
+            0x2 => c == 1,
+
+            // CC/LO
+            0x3 => c == 0,
+
+            // MI
+            0x4 => n == 1,
+
+            // PL
+            0x5 => n == 0,
+
+            // VS
+            0x6 => v == 1,
+
+            // VC
+            0x7 => v == 0,
+
+            // HI
+            0x8 => c == 1 && z == 0,
+
+            // LS
+            0x9 => c == 0 || z == 1,
+
+            // GE
+            0xA => n == v,
+
+            // LT
+            0xB => n != v,
+
+            // GT
+            0xC => z == 0 && n == v,
+
+            // LE
+            0xD => z == 1 || n != v,
+
+            // AL
+            0xE => true,
+
+            // NV
             _ => {
-                error!("CPU Register read index out of bounds: {}", index);
+                warn!("Never condition code found");
+                false
             }
         }
     }
+}
 
-    fn get_register_value(&self, index: usize) -> u32 {
-        let curr_mode = self.get_effective_cpu_mode();
-        match index {
-            0..8 => self.registers.common[index],
-            8..=12 => {
-                if curr_mode == CPUMode::Fiq {
-                    self.registers.fiq[index - 8]
-                } else {
-                    self.registers.common[index]
-                }
-            }
-            13..=14 => {
-                let value = self.registers.pointers.get(&curr_mode).unwrap();
-
-                if index == 13 { value.0 } else { value.1 }
-            }
-            PC => self.registers.pc,
-
-            _ => {
-                error!("CPU Register read index out of bounds: {}", index);
-                0
-            }
-        }
-    }
-
+// Step Logic
+impl CPU {
     pub fn step(&mut self, memory: &GBAMemory) -> u32 {
         if self.registers.pc >= memory.get_rom_size() as u32 {
             error!(
