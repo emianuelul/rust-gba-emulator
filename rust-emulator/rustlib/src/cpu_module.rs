@@ -140,11 +140,7 @@ impl CPU {
             13..=14 => {
                 let value = self.registers.pointers.get(&curr_mode).unwrap();
 
-                if index == 13 {
-                    value.0
-                } else {
-                    value.1
-                }
+                if index == 13 { value.0 } else { value.1 }
             }
             PC => self.registers.pc,
 
@@ -162,8 +158,8 @@ impl CPU {
         ((self.cpsr >> index) & 1) as u8
     }
 
-    fn set_cpsr_bit(&mut self, index: usize, value: bool) {
-        if value {
+    fn set_cpsr_bit(&mut self, index: usize, value: u8) {
+        if value == 1 {
             self.cpsr |= 1 << index
         } else {
             self.cpsr &= !(1 << index)
@@ -276,7 +272,107 @@ impl CPU {
         ((value << 8) as i32) >> 8
     }
 
-    fn execute_alu_op(&mut self, opcode: u8, rn: u8, rd: u8, operand2: u32, s: bool) {}
+    fn get_arm_operand_value(&self, index: usize) -> u32 {
+        if index == PC {
+            self.registers.pc + 8
+        } else {
+            self.get_register_value(index)
+        }
+    }
+
+    fn rrx(&mut self, to_shift: u32) -> u32 {
+        let old_c = self.get_cpsr_bit(C_FLAG);
+        let lsb = (to_shift & 1) as u8;
+        self.set_cpsr_bit(C_FLAG, lsb);
+
+        (to_shift >> 1) | ((old_c as u32) << 31)
+    }
+
+    fn execute_alu_op(&mut self, opcode: u8, rn: u8, rd: u8, op2: u32, s: u8) {}
+
+    fn apply_alu_shift(
+        &mut self,
+        shift_type: u8,
+        to_shift: u32,
+        amount: u8,
+        imm: bool,
+        s: u8,
+    ) -> u32 {
+        match shift_type {
+            0 => {
+                if amount == 0 {
+                    to_shift
+                } else if amount >= 32 {
+                    if s == 1 {
+                        if amount > 32 {
+                            self.set_cpsr_bit(C_FLAG, 0);
+                        } else {
+                            self.set_cpsr_bit(C_FLAG, (to_shift & 1) as u8);
+                        }
+                    }
+                    0
+                } else {
+                    if s == 1 {
+                        let carry_bit = ((to_shift >> (32 - amount)) & 1) as u8;
+                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                    }
+                    to_shift << amount
+                }
+            }
+
+            1 => {
+                if amount >= 32 || (amount == 0 && imm) {
+                    if s == 1 {
+                        let carry_bit = ((to_shift >> 31) & 1) as u8;
+                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                    }
+                    0
+                } else if amount == 0 {
+                    to_shift
+                } else {
+                    if s == 1 {
+                        let carry_bit = ((to_shift >> (amount - 1)) & 1) as u8;
+                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                    }
+                    to_shift >> amount
+                }
+            }
+
+            2 => {
+                if amount >= 32 || (amount == 0 && imm) {
+                    if s == 1 {
+                        let carry_bit = ((to_shift >> 31) & 1) as u8;
+                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                    }
+                    let first_bit = (to_shift >> 31) & 1;
+                    if first_bit == 1 { u32::MAX } else { 0 }
+                } else if amount == 0 {
+                    to_shift
+                } else {
+                    if s == 1 {
+                        let carry_bit = ((to_shift >> (amount - 1)) & 1) as u8;
+                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                    }
+                    (to_shift as i32 >> amount) as u32
+                }
+            }
+
+            3 => {
+                if amount == 0 && imm {
+                    self.rrx(to_shift)
+                } else if amount == 0 {
+                    to_shift
+                } else {
+                    if s == 1 {
+                        let carry_bit = ((to_shift >> (amount - 1)) & 1) as u8;
+                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                    }
+                    to_shift.rotate_right(amount as u32)
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
 
     #[bitmatch]
     pub fn step(&mut self, memory: &GBAMemory) -> u32 {
@@ -331,10 +427,10 @@ impl CPU {
                             let register_value = self.get_register_value(n as usize);
 
                             if register_value % 2 == 1 {
-                                self.set_cpsr_bit(T_FLAG, true);
+                                self.set_cpsr_bit(T_FLAG, 1);
                                 self.registers.pc = register_value & !1;
                             } else {
-                                self.set_cpsr_bit(T_FLAG, false);
+                                self.set_cpsr_bit(T_FLAG, 0);
                                 self.registers.pc = register_value & !3;
                             }
 
@@ -347,19 +443,58 @@ impl CPU {
                             // 2S + 1N
                         }
 
-                        // ALU (I = 1) (ror shift on imm)
-                        "????_00_i_oooo_s_rrrr_dddd_ssss_nnnnnnnn" => {
-                            todo!("op2 is shifted imm");
+                        // alu (i = 1)
+                        "????_00_1_oooo_s_rrrr_dddd_hhhh_nnnnnnnn" => {
+                            let opcode = o as u8;
+                            let rn = r as u8;
+                            let rd = d as u8;
+                            let imm = n;
+                            let op2 = imm.rotate_right(h * 2);
+
+                            if s == 1 && h != 0 {
+                                let carry_bit = (op2 >> 31) as u8;
+                                self.set_cpsr_bit(C_FLAG, carry_bit);
+                            }
+
+                            self.execute_alu_op(opcode, rn, rd, op2, s as u8);
                         }
 
-                        // ALU (I = 0, R = 0) (register is shifted by shifted immediate)
-                        "????_00_0_oooo_s_rrrr_dddd_sssss_tt_0_nnnn" => {
-                            todo!("op2 is shifted register shifted by imm")
+                        // alu (i = 0, r = 0)
+                        "????_00_0_oooo_s_rrrr_dddd_hhhhh_tt_0_nnnn" => {
+                            let opcode = o as u8;
+                            let rn = r as u8;
+                            let rd = d as u8;
+                            let rm = self.get_arm_operand_value(n as usize);
+                            let shift = h;
+                            let shift_type = t;
+                            let op2 = self.apply_alu_shift(
+                                shift_type as u8,
+                                rm,
+                                shift as u8,
+                                true,
+                                s as u8,
+                            );
+
+                            self.execute_alu_op(opcode, rn, rd, op2, s as u8);
                         }
 
-                        // ALU (I = 0, R = 1) (register is shifted by shifted register)
-                        "????_00_0_oooo_s_rrrr_dddd_ssss_0_tt_1_nnnn" => {
-                            todo!("op2 is shifted register shifted by register")
+                        // alu (i = 0, r = 1)
+                        "????_00_0_oooo_s_rrrr_dddd_hhhh_0_tt_1_nnnn" => {
+                            let opcode = o as u8;
+                            let rn = r as u8;
+                            let rd = d as u8;
+                            let rm = self.get_arm_operand_value(n as usize);
+                            let shift = self.get_arm_operand_value(h as usize) & 0xff;
+                            let shift_type = t;
+                            let op2 = self.apply_alu_shift(
+                                shift_type as u8,
+                                rm,
+                                shift as u8,
+                                false,
+                                s as u8,
+                            );
+
+                            self.execute_alu_op(opcode, rn, rd, op2, s as u8);
                         }
 
                         _ => {
@@ -368,6 +503,7 @@ impl CPU {
                     }
                 } else {
                     self.registers.pc += 4;
+                    // clk +1S
                 }
             }
             CPUState::Thumb => {}
