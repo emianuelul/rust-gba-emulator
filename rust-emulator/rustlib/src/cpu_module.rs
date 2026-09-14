@@ -265,8 +265,7 @@ impl CPU {
     }
 }
 
-// Step Logic
-// TODO: Revisit after waitcnt
+// ARM ALU Logic
 impl CPU {
     fn convert_u24_to_i32(&self, value: u32) -> i32 {
         ((value << 8) as i32) >> 8
@@ -275,9 +274,9 @@ impl CPU {
     fn get_arm_operand_value(&self, index: usize, i: u8, r: u8) -> u32 {
         if index == PC {
             if i == 0 && r == 1 {
-                self.registers.pc + 12
-            } else {
                 self.registers.pc + 8
+            } else {
+                self.registers.pc + 4
             }
         } else {
             self.get_register_value(index)
@@ -656,7 +655,11 @@ impl CPU {
             _ => unreachable!(),
         }
     }
+}
 
+// Step Logic
+// TODO: Revisit after waitcnt
+impl CPU {
     #[bitmatch]
     pub fn step(&mut self, memory: &GBAMemory) -> u32 {
         if self.registers.pc >= memory.get_rom_size() as u32 {
@@ -675,6 +678,8 @@ impl CPU {
                 let (instruction, read) = memory.read32(self.get_register_value(PC));
                 clk += read;
 
+                self.registers.pc += 4;
+
                 #[bitmatch]
                 let "cccc_????????????????????????????" = instruction;
 
@@ -684,7 +689,7 @@ impl CPU {
                         // B
                         "????_101_0_nnnnnnnnnnnnnnnnnnnnnnnn" => {
                             self.registers.pc =
-                                (self.registers.pc as i32 + 8 + self.convert_u24_to_i32(n) * 4)
+                                (self.registers.pc as i32 + 4 + self.convert_u24_to_i32(n) * 4)
                                     as u32;
 
                             // 2S + 1N
@@ -692,9 +697,9 @@ impl CPU {
 
                         // BL
                         "????_101_1_nnnnnnnnnnnnnnnnnnnnnnnn" => {
-                            self.set_register_value(LR, self.registers.pc + 4);
+                            self.set_register_value(LR, self.registers.pc);
                             self.registers.pc =
-                                (self.registers.pc as i32 + 8 + self.convert_u24_to_i32(n) * 4)
+                                (self.registers.pc as i32 + 4 + self.convert_u24_to_i32(n) * 4)
                                     as u32;
 
                             // 2S + 1N
@@ -703,7 +708,7 @@ impl CPU {
                         // BX
                         "????_0001_0010_1111_1111_1111_0001_nnnn" => {
                             if n == 15 {
-                                self.registers.pc += 8;
+                                self.registers.pc += 4;
                                 // 2S + 1N
                             }
 
@@ -767,12 +772,12 @@ impl CPU {
                             let rn = self.get_arm_operand_value(r as usize, 0, 1);
                             let rd = d as u8;
                             let rm = self.get_arm_operand_value(n as usize, 0, 1);
-                            let shift = self.get_arm_operand_value(h as usize, 0, 1) & 0xff;
+                            let rs = self.get_register_value(h as usize) & 0xff;
                             let shift_type = t;
                             let op2 = self.apply_alu_shift(
                                 shift_type as u8,
                                 rm,
-                                shift as u8,
+                                rs as u8,
                                 false,
                                 s as u8,
                             );
@@ -785,7 +790,7 @@ impl CPU {
                         }
                     }
                 } else {
-                    self.registers.pc += 4;
+                    todo!("add clk + 1S");
                     // clk +1S
                 }
             }
