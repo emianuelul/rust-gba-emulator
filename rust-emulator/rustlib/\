@@ -24,7 +24,7 @@ const IRQ_FLAG: usize = 7;
 const FIQ_FLAG: usize = 6;
 const T_FLAG: usize = 5;
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq)]
 enum CPUMode {
     UserSys,
     User,
@@ -272,24 +272,12 @@ impl CPU {
         ((value << 8) as i32) >> 8
     }
 
-    fn get_arm_operand_value(&self, index: usize, i: u8, r: u8) -> u32 {
+    fn get_arm_operand_value(&self, index: usize) -> u32 {
         if index == PC {
-            if i == 0 && r == 1 {
-                self.registers.pc + 12
-            } else {
-                self.registers.pc + 8
-            }
+            self.registers.pc + 8
         } else {
             self.get_register_value(index)
         }
-    }
-
-    fn alu_set_n_z_flags(&mut self, data: u32) {
-        let z_bit: u8 = if data == 0 { 1 } else { 0 };
-        let n_bit: u8 = ((data >> 31) & 1) as u8;
-
-        self.set_cpsr_bit(Z_FLAG, z_bit);
-        self.set_cpsr_bit(N_FLAG, n_bit);
     }
 
     fn rrx(&mut self, to_shift: u32) -> u32 {
@@ -300,35 +288,13 @@ impl CPU {
         (to_shift >> 1) | ((old_c as u32) << 31)
     }
 
-    fn execute_alu_op(&mut self, opcode: u8, rn_value: u32, rd: u8, op2: u32, s: u8) {
-        let mode: CPUMode = self.get_cpu_mode();
-
-        let s: u8 = if s == 1 && rd == 15 {
-            if mode != CPUMode::Sys && mode != CPUMode::User {
-                self.cpsr = if let Some(&value) = self.spsr.get(&mode) {
-                    value
-                } else {
-                    self.cpsr
-                };
-
-                0
-            } else {
-                error!("CPUMode is {:?} and Rd = PC", mode);
-
-                s
-            }
-        } else {
-            s
-        };
+    fn execute_alu_op(&mut self, opcode: u8, rn: u8, rd: u8, op2: u32, s: u8) {
+        let rn_value = self.get_arm_operand_value(rn as usize);
 
         match opcode {
             // AND
             0x0 => {
                 let data = rn_value & op2;
-
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-                }
 
                 self.set_register_value(rd as usize, data);
             }
@@ -337,236 +303,58 @@ impl CPU {
             0x1 => {
                 let data = rn_value ^ op2;
 
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-                }
-
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd as usize, register);
             }
 
             // SUB
             0x2 => {
-                let data = rn_value.wrapping_sub(op2);
-
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-
-                    let c_bit = !rn_value.overflowing_sub(op2).1 as u8;
-                    let v_bit = i32::overflowing_sub(rn_value as i32, op2 as i32).1 as u8;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit);
-                    self.set_cpsr_bit(V_FLAG, v_bit);
-                }
+                let data = rn_value - op2;
 
                 self.set_register_value(rd as usize, data);
             }
 
             // RSB
             0x3 => {
-                let data = op2.wrapping_sub(rn_value);
-
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-
-                    let c_bit = !op2.overflowing_sub(rn_value).1 as u8;
-                    let v_bit = i32::overflowing_sub(op2 as i32, rn_value as i32).1 as u8;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit);
-                    self.set_cpsr_bit(V_FLAG, v_bit);
-                }
+                let data = op2 - rn_value;
 
                 self.set_register_value(rd as usize, data);
             }
 
             // ADD
-            0x4 => {
-                let data = rn_value.wrapping_add(op2);
-
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-                    let c_bit = rn_value.overflowing_add(op2).1 as u8;
-                    let v_bit = i32::overflowing_add(rn_value as i32, op2 as i32).1 as u8;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit);
-                    self.set_cpsr_bit(V_FLAG, v_bit);
-                }
-
-                self.set_register_value(rd as usize, data);
-            }
+            0x4 => {}
 
             // ADC
-            0x5 => {
-                let data = rn_value
-                    .wrapping_add(op2)
-                    .wrapping_add(self.get_cpsr_bit(C_FLAG) as u32);
-
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-
-                    let (sum1, c1) = rn_value.overflowing_add(op2);
-                    let (_, c2) = sum1.overflowing_add(self.get_cpsr_bit(C_FLAG) as u32);
-                    let c_bit = c1 || c2;
-
-                    let (sum1, v1) = i32::overflowing_add(rn_value as i32, op2 as i32);
-                    let (_, v2) = i32::overflowing_add(sum1, self.get_cpsr_bit(C_FLAG) as i32);
-                    let v_bit = v1 || v2;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit as u8);
-                    self.set_cpsr_bit(V_FLAG, v_bit as u8);
-                }
-
-                self.set_register_value(rd as usize, data);
-            }
+            0x5 => {}
 
             // SBC
-            0x6 => {
-                let data = rn_value
-                    .wrapping_sub(op2)
-                    .wrapping_add((self.get_cpsr_bit(C_FLAG) as u32).wrapping_sub(1));
-
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-
-                    let (sub1, c1) = rn_value.overflowing_sub(op2);
-                    let (_, c2) =
-                        sub1.overflowing_add((self.get_cpsr_bit(C_FLAG) as u32).wrapping_sub(1));
-                    let c_bit = !c1 || c2;
-
-                    let (sub1, v1) = i32::overflowing_sub(rn_value as i32, op2 as i32);
-                    let (_, v2) = i32::overflowing_add(
-                        sub1,
-                        (self.get_cpsr_bit(C_FLAG) as i32).wrapping_sub(1),
-                    );
-                    let v_bit = v1 || v2;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit as u8);
-                    self.set_cpsr_bit(V_FLAG, v_bit as u8);
-                }
-
-                self.set_register_value(rd as usize, data);
-            }
+            0x6 => {}
 
             // RSC
-            0x7 => {
-                let data = op2
-                    .wrapping_sub(rn_value)
-                    .wrapping_add((self.get_cpsr_bit(C_FLAG) as u32).wrapping_sub(1));
-
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-
-                    let (sub1, c1) = op2.overflowing_sub(rn_value);
-                    let (_, c2) =
-                        sub1.overflowing_add((self.get_cpsr_bit(C_FLAG) as u32).wrapping_sub(1));
-                    let c_bit = !c1 || c2;
-
-                    let (sub1, v1) = i32::overflowing_sub(op2 as i32, rn_value as i32);
-                    let (_, v2) = i32::overflowing_add(
-                        sub1,
-                        (self.get_cpsr_bit(C_FLAG) as i32).wrapping_sub(1),
-                    );
-                    let v_bit = v1 || v2;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit as u8);
-                    self.set_cpsr_bit(V_FLAG, v_bit as u8);
-                }
-
-                self.set_register_value(rd as usize, data);
-            }
+            0x7 => {}
 
             // TST
-            0x8 => {
-                let data = rn_value & op2;
-
-                if s == 1 && rd != 15 {
-                    self.alu_set_n_z_flags(data);
-                } else if s == 1 && rd == 15 {
-                    warn!("TSTP in User/Sys mode (not allowed)");
-                }
-            }
+            0x8 => {}
 
             // TEQ
-            0x9 => {
-                let data = rn_value ^ op2;
-
-                if s == 1 && rd != 15 {
-                    self.alu_set_n_z_flags(data);
-                } else if s == 1 && rd == 15 {
-                    warn!("TEQP in User/Sys mode (not allowed)")
-                }
-            }
+            0x9 => {}
 
             // CMP
-            0xA => {
-                let data = rn_value.wrapping_sub(op2);
-
-                if s == 1 && rd != 15 {
-                    self.alu_set_n_z_flags(data);
-                    let c_bit = !rn_value.overflowing_sub(op2).1 as u8;
-                    let v_bit = i32::overflowing_sub(rn_value as i32, op2 as i32).1 as u8;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit);
-                    self.set_cpsr_bit(V_FLAG, v_bit);
-                } else if s == 1 && rd == 15 {
-                    warn!("CMPP in User/Sys mode (not allowed)")
-                }
-            }
+            0xA => {}
 
             // CMN
-            0xB => {
-                let data = rn_value.wrapping_add(op2);
-
-                if s == 1 && rd != 15 {
-                    self.alu_set_n_z_flags(data);
-                    let c_bit = rn_value.overflowing_add(op2).1 as u8;
-                    let v_bit = i32::overflowing_add(rn_value as i32, op2 as i32).1 as u8;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit);
-                    self.set_cpsr_bit(V_FLAG, v_bit);
-                } else if s == 1 && rd == 15 {
-                    warn!("CMNP in User/Sys mode (not allowed)")
-                }
-            }
+            0xB => {}
 
             // ORR
-            0xC => {
-                let data = rn_value | op2;
-
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-                }
-
-                self.set_register_value(rd as usize, data);
-            }
+            0xC => {}
 
             // MOV
-            0xD => {
-                if s == 1 {
-                    self.alu_set_n_z_flags(op2);
-                }
-
-                self.set_register_value(rd as usize, op2);
-            }
+            0xD => {}
 
             // BIC
-            0xE => {
-                let data = rn_value & !op2;
-
-                if s == 1 {
-                    self.alu_set_n_z_flags(data);
-                }
-
-                self.set_register_value(rd as usize, data);
-            }
+            0xE => {}
 
             // MVN
-            0xF => {
-                if s == 1 {
-                    self.alu_set_n_z_flags(!op2);
-                }
-
-                self.set_register_value(rd as usize, !op2);
-            }
+            0xF => {}
             _ => {
                 unreachable!()
             }
@@ -729,7 +517,7 @@ impl CPU {
                         // alu (i = 1)
                         "????_00_1_oooo_s_rrrr_dddd_hhhh_nnnnnnnn" => {
                             let opcode = o as u8;
-                            let rn = self.get_arm_operand_value(r as usize, 1, 0);
+                            let rn = r as u8;
                             let rd = d as u8;
                             let imm = n;
                             let op2 = imm.rotate_right(h * 2);
@@ -745,9 +533,9 @@ impl CPU {
                         // alu (i = 0, r = 0)
                         "????_00_0_oooo_s_rrrr_dddd_hhhhh_tt_0_nnnn" => {
                             let opcode = o as u8;
-                            let rn = self.get_arm_operand_value(r as usize, 0, 0);
+                            let rn = r as u8;
                             let rd = d as u8;
-                            let rm = self.get_arm_operand_value(n as usize, 0, 0);
+                            let rm = self.get_arm_operand_value(n as usize);
                             let shift = h;
                             let shift_type = t;
                             let op2 = self.apply_alu_shift(
@@ -764,10 +552,10 @@ impl CPU {
                         // alu (i = 0, r = 1)
                         "????_00_0_oooo_s_rrrr_dddd_hhhh_0_tt_1_nnnn" => {
                             let opcode = o as u8;
-                            let rn = self.get_arm_operand_value(r as usize, 0, 1);
+                            let rn = r as u8;
                             let rd = d as u8;
-                            let rm = self.get_arm_operand_value(n as usize, 0, 1);
-                            let shift = self.get_arm_operand_value(h as usize, 0, 1) & 0xff;
+                            let rm = self.get_arm_operand_value(n as usize);
+                            let shift = self.get_arm_operand_value(h as usize) & 0xff;
                             let shift_type = t;
                             let op2 = self.apply_alu_shift(
                                 shift_type as u8,
