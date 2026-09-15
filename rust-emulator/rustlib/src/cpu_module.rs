@@ -11,6 +11,8 @@ use tracing::{error, warn};
 
 // TODO: refactor get_register_value and set_register_value to work for THUMB
 
+// REMINDER: PC IS ADVANCED AFTER FETCH; OPERATIONS USE, BASICALLY, THE OLD PC
+
 const SP: usize = 13;
 const LR: usize = 14;
 const PC: usize = 15;
@@ -140,7 +142,11 @@ impl CPU {
             13..=14 => {
                 let value = self.registers.pointers.get(&curr_mode).unwrap();
 
-                if index == 13 { value.0 } else { value.1 }
+                if index == 13 {
+                    value.0
+                } else {
+                    value.1
+                }
             }
             PC => self.registers.pc,
 
@@ -627,7 +633,11 @@ impl CPU {
                         self.set_cpsr_bit(C_FLAG, carry_bit);
                     }
                     let first_bit = (to_shift >> 31) & 1;
-                    if first_bit == 1 { u32::MAX } else { 0 }
+                    if first_bit == 1 {
+                        u32::MAX
+                    } else {
+                        0
+                    }
                 } else if amount == 0 {
                     to_shift
                 } else {
@@ -659,7 +669,170 @@ impl CPU {
 
 // Step Logic
 // TODO: Revisit after waitcnt
+// m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
 impl CPU {
+    fn execute_mul_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
+        let rs_value = self.get_register_value(rs as usize);
+        let rm_value = self.get_register_value(rm as usize);
+
+        // rd > RdHi
+        // rn > RdLo
+
+        // handle s == 1
+        match op {
+            // MUL
+            0b0000 => {
+                if rd == rm || rd == PC as u8 || rs == PC as u8 || rm == PC as u8 {
+                    error!("MUL called with invalid args (Rd is Rm or Arg is PC)");
+                    return 0;
+                }
+
+                let data: u32 = rs_value.wrapping_mul(rm_value);
+
+                self.set_register_value(rd as usize, data);
+
+                // 1S + mI
+                0
+            }
+
+            // MLA
+            0b0001 => {
+                if rd == rm || rd == PC as u8 || rs == PC as u8 || rm == PC as u8 {
+                    error!("MLA called with invalid args (Rd is Rm or Arg is PC)");
+                    return 0;
+                }
+
+                let rn_value = self.get_register_value(rn as usize);
+                let data: u32 = rs_value.wrapping_mul(rm_value).wrapping_add(rn_value);
+
+                self.set_register_value(rd as usize, data);
+
+                // 1S + (m + 1)I
+                0
+            }
+
+            // UMULL
+            0b0100 => {
+                if rd == PC as u8
+                    || rn == PC as u8
+                    || rm == PC as u8
+                    || rd == rn
+                    || rd == rm
+                    || rs == rm
+                {
+                    error!(
+                        "UMULL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
+                    );
+                    return 0;
+                }
+
+                let data: u64 = rm_value as u64 * rs_value as u64;
+                let hi: u32 = (data >> 32) as u32;
+                let lo: u32 = ((data << 32) >> 32) as u32;
+
+                self.set_register_value(rd as usize, hi);
+                self.set_register_value(rn as usize, lo);
+
+                // 1S + (m + 1)I
+                0
+            }
+
+            // UMLAL
+            0b0101 => {
+                if rd == PC as u8
+                    || rn == PC as u8
+                    || rm == PC as u8
+                    || rd == rn
+                    || rd == rm
+                    || rs == rm
+                {
+                    error!(
+                        "UMLAL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
+                    );
+                    return 0;
+                }
+
+                let stored_hilo: u64 = (self.get_register_value(rd as usize) as u64) << 32
+                    | (self.get_register_value(rn as usize) as u64);
+
+                let data: u64 = (rm_value as u64)
+                    .wrapping_mul(rs_value as u64)
+                    .wrapping_add(stored_hilo);
+                let hi: u32 = (data >> 32) as u32;
+                let lo: u32 = ((data << 32) >> 32) as u32;
+
+                self.set_register_value(rd as usize, hi);
+                self.set_register_value(rn as usize, lo);
+
+                // 1S + (m+2)I
+                0
+            }
+
+            // SMULL
+            0b0110 => {
+                if rd == PC as u8
+                    || rn == PC as u8
+                    || rm == PC as u8
+                    || rd == rn
+                    || rd == rm
+                    || rs == rm
+                {
+                    error!(
+                        "SMULL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
+                    );
+                    return 0;
+                }
+
+                let data: u64 = (rm_value as i32 as u64).wrapping_mul(rs_value as i32 as u64);
+                let hi: u32 = (data >> 32) as u32;
+                let lo: u32 = ((data << 32) >> 32) as u32;
+
+                self.set_register_value(rd as usize, hi);
+                self.set_register_value(rn as usize, lo);
+
+                // 1S + (m+1)I
+                0
+            }
+
+            // SMLAL
+            0b0111 => {
+                if rd == PC as u8
+                    || rn == PC as u8
+                    || rm == PC as u8
+                    || rd == rn
+                    || rd == rm
+                    || rs == rm
+                {
+                    error!(
+                        "UMLAL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
+                    );
+
+                    return 0;
+                }
+
+                let stored_hilo: i64 = ((self.get_register_value(rd as usize) as u64) << 32
+                    | (self.get_register_value(rn as usize) as u64))
+                    as i64;
+
+                let data: u64 = (rm_value as i32 as u64 as i64)
+                    .wrapping_mul(rs_value as i32 as u64 as i64)
+                    .wrapping_add(stored_hilo) as u64;
+                let hi: u32 = (data >> 32) as u32;
+                let lo: u32 = ((data << 32) >> 32) as u32;
+
+                self.set_register_value(rd as usize, hi);
+                self.set_register_value(rn as usize, lo);
+
+                // 1S + (m+2)I
+                0
+            }
+            _ => {
+                error!("Unsupported MUL opcode: {:b}", op);
+                0
+            }
+        }
+    }
+
     #[bitmatch]
     pub fn step(&mut self, memory: &GBAMemory) -> u32 {
         if self.registers.pc >= memory.get_rom_size() as u32 {
@@ -745,6 +918,8 @@ impl CPU {
                             }
 
                             self.execute_alu_op(opcode, rn, rd, op2, s as u8);
+
+                            // (1+p)S+rI+pN
                         }
 
                         // alu (i = 0, r = 0)
@@ -764,6 +939,8 @@ impl CPU {
                             );
 
                             self.execute_alu_op(opcode, rn, rd, op2, s as u8);
+
+                            // (1+p)S+rI+pN
                         }
 
                         // alu (i = 0, r = 1)
@@ -783,10 +960,22 @@ impl CPU {
                             );
 
                             self.execute_alu_op(opcode, rn, rd, op2, s as u8);
+
+                            // (1+p)S+rI+pN
+                        }
+
+                        // Multiply & Multiply-Accumulate
+                        "????_000_oooo_s_dddd_nnnn_ffff_1001_mmmm" => {
+                            let opcode = o as u8;
+                            let set_condition = s as u8;
+                            let rd = d as u8;
+                            let rn = n as u8;
+                            let rs = f as u8;
+                            let rm = m as u8;
                         }
 
                         _ => {
-                            error!("Invalid error detected: {:b}", instruction);
+                            error!("Invalid instruction detected: {:b}", instruction);
                         }
                     }
                 } else {
