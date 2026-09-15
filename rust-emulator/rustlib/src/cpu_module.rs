@@ -678,7 +678,6 @@ impl CPU {
         // rd > RdHi
         // rn > RdLo
 
-        // handle s == 1
         match op {
             // MUL
             0b0000 => {
@@ -686,10 +685,17 @@ impl CPU {
                     error!("MUL called with invalid args (Rd is Rm or Arg is PC)");
                     return 0;
                 }
-
                 let data: u32 = rs_value.wrapping_mul(rm_value);
 
                 self.set_register_value(rd as usize, data);
+
+                if s == 1 {
+                    let z_bit: u8 = if data == 0 { 1 } else { 0 };
+                    let n_bit: u8 = ((data >> 31) & 1) as u8;
+
+                    self.set_cpsr_bit(Z_FLAG, z_bit);
+                    self.set_cpsr_bit(N_FLAG, n_bit);
+                }
 
                 // 1S + mI
                 0
@@ -697,7 +703,8 @@ impl CPU {
 
             // MLA
             0b0001 => {
-                if rd == rm || rd == PC as u8 || rs == PC as u8 || rm == PC as u8 {
+                if rd == rm || rn == PC as u8 || rd == PC as u8 || rs == PC as u8 || rm == PC as u8
+                {
                     error!("MLA called with invalid args (Rd is Rm or Arg is PC)");
                     return 0;
                 }
@@ -706,6 +713,14 @@ impl CPU {
                 let data: u32 = rs_value.wrapping_mul(rm_value).wrapping_add(rn_value);
 
                 self.set_register_value(rd as usize, data);
+
+                if s == 1 {
+                    let z_bit: u8 = if data == 0 { 1 } else { 0 };
+                    let n_bit: u8 = ((data >> 31) & 1) as u8;
+
+                    self.set_cpsr_bit(Z_FLAG, z_bit);
+                    self.set_cpsr_bit(N_FLAG, n_bit);
+                }
 
                 // 1S + (m + 1)I
                 0
@@ -732,6 +747,14 @@ impl CPU {
 
                 self.set_register_value(rd as usize, hi);
                 self.set_register_value(rn as usize, lo);
+
+                if s == 1 {
+                    let z_bit: u8 = if data == 0 { 1 } else { 0 };
+                    let n_bit: u8 = ((data >> 63) & 1) as u8;
+
+                    self.set_cpsr_bit(Z_FLAG, z_bit);
+                    self.set_cpsr_bit(N_FLAG, n_bit);
+                }
 
                 // 1S + (m + 1)I
                 0
@@ -764,6 +787,14 @@ impl CPU {
                 self.set_register_value(rd as usize, hi);
                 self.set_register_value(rn as usize, lo);
 
+                if s == 1 {
+                    let z_bit: u8 = if data == 0 { 1 } else { 0 };
+                    let n_bit: u8 = ((data >> 63) & 1) as u8;
+
+                    self.set_cpsr_bit(Z_FLAG, z_bit);
+                    self.set_cpsr_bit(N_FLAG, n_bit);
+                }
+
                 // 1S + (m+2)I
                 0
             }
@@ -790,6 +821,14 @@ impl CPU {
                 self.set_register_value(rd as usize, hi);
                 self.set_register_value(rn as usize, lo);
 
+                if s == 1 {
+                    let z_bit: u8 = if data == 0 { 1 } else { 0 };
+                    let n_bit: u8 = ((data >> 63) & 1) as u8;
+
+                    self.set_cpsr_bit(Z_FLAG, z_bit);
+                    self.set_cpsr_bit(N_FLAG, n_bit);
+                }
+
                 // 1S + (m+1)I
                 0
             }
@@ -804,7 +843,7 @@ impl CPU {
                     || rs == rm
                 {
                     error!(
-                        "UMLAL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
+                        "SMLAL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
                     );
 
                     return 0;
@@ -822,6 +861,14 @@ impl CPU {
 
                 self.set_register_value(rd as usize, hi);
                 self.set_register_value(rn as usize, lo);
+
+                if s == 1 {
+                    let z_bit: u8 = if data == 0 { 1 } else { 0 };
+                    let n_bit: u8 = ((data >> 63) & 1) as u8;
+
+                    self.set_cpsr_bit(Z_FLAG, z_bit);
+                    self.set_cpsr_bit(N_FLAG, n_bit);
+                }
 
                 // 1S + (m+2)I
                 0
