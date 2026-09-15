@@ -667,9 +667,7 @@ impl CPU {
     }
 }
 
-// Step Logic
-// TODO: Revisit after waitcnt
-// m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
+// MUL Logic
 impl CPU {
     fn execute_mul_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
         let rs_value = self.get_register_value(rs as usize);
@@ -879,7 +877,12 @@ impl CPU {
             }
         }
     }
+}
 
+// Step Logic
+// TODO: Revisit after waitcnt
+// m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
+impl CPU {
     #[bitmatch]
     pub fn step(&mut self, memory: &GBAMemory) -> u32 {
         if self.registers.pc >= memory.get_rom_size() as u32 {
