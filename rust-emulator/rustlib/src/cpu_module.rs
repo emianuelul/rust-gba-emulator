@@ -76,6 +76,7 @@ pub struct CPU {
     spsr: HashMap<CPUMode, u32>,
 }
 
+// init
 impl CPU {
     pub fn new() -> Self {
         CPU {
@@ -879,6 +880,68 @@ impl CPU {
     }
 }
 
+// PSR Transfer Logic
+impl CPU {
+    fn psr_get_new_psr(
+        &self,
+        psr: u32,
+        op: u32,
+        flags: u8,
+        status: u8,
+        extension: u8,
+        control: u8,
+    ) -> u32 {
+        let op_bytes = op.to_be_bytes();
+        let psr_bytes = psr.to_be_bytes();
+
+        let first_byte = if flags == 1 {
+            psr_bytes[0] as u32
+        } else {
+            op_bytes[0] as u32
+        };
+        let second_byte = if status == 1 {
+            psr_bytes[1] as u32
+        } else {
+            op_bytes[1] as u32
+        };
+        let third_byte = if extension == 1 {
+            psr_bytes[2] as u32
+        } else {
+            op_bytes[2] as u32
+        };
+        let fourth_byte = if control == 1 {
+            psr_bytes[3] as u32
+        } else {
+            op_bytes[3] as u32
+        };
+
+        first_byte << 24 | second_byte << 16 | third_byte << 8 | fourth_byte
+    }
+
+    fn psr_handle_msr_op(&mut self, p: u8, op: u32, write_arr: [u8; 4]) {
+        let psr = if p == 0 {
+            self.cpsr
+        } else {
+            *self.spsr.get(&self.get_effective_cpu_mode()).unwrap()
+        };
+
+        let new_psr: u32 = self.psr_get_new_psr(
+            psr,
+            op,
+            write_arr[0],
+            write_arr[1],
+            write_arr[2],
+            write_arr[3],
+        );
+
+        if p == 0 {
+            self.cpsr = new_psr;
+        } else {
+            self.spsr.insert(self.get_effective_cpu_mode(), new_psr);
+        }
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
@@ -1000,6 +1063,7 @@ impl CPU {
                             let rd = d as u8;
                             let rm = self.get_arm_operand_value(n as usize, 0, 1);
                             let rs = self.get_register_value(h as usize) & 0xff;
+                            let set_condition = s as u8;
                             let shift_type = t;
                             let op2 = self.apply_alu_shift(
                                 shift_type as u8,
@@ -1016,14 +1080,48 @@ impl CPU {
 
                         // Multiply & Multiply-Accumulate
                         "????_000_oooo_s_dddd_nnnn_ffff_1001_mmmm" => {
-                            let opcode = o as u8;
-                            let set_condition = s as u8;
+                            let op = o as u8;
                             let rd = d as u8;
                             let rn = n as u8;
                             let rs = f as u8;
                             let rm = m as u8;
+
+                            self.execute_mul_op(op, rd, rn, rs, rm, s as u8);
                         }
 
+                        // PSR Transfer (i = 0, MRS)
+                        "????_00_0_10_p_0_0_1111_dddd_0000000000000" => {
+                            let psr = if p == 0 {
+                                self.cpsr
+                            } else {
+                                *self.spsr.get(&self.get_effective_cpu_mode()).unwrap()
+                            };
+                            let rd = d as u8;
+
+                            self.set_register_value(rd as usize, psr);
+                        }
+
+                        // PSR Transfer (i = 0, MSR)
+                        "????_00_0_10_p_1_0_f_s_x_c_1111_00000000_mmmm" => {
+                            let op = self.get_register_value(m as usize);
+
+                            self.psr_handle_msr_op(
+                                p as u8,
+                                op,
+                                [f as u8, s as u8, x as u8, c as u8],
+                            );
+                        }
+
+                        // PSR Transfer (i = 1, MSR)
+                        "????_00_1_10_p_1_0_f_s_x_c_1111_hhhh_iiiiiiii" => {
+                            let op = i.rotate_right(h * 2);
+
+                            self.psr_handle_msr_op(
+                                p as u8,
+                                op,
+                                [f as u8, s as u8, x as u8, c as u8],
+                            );
+                        }
                         _ => {
                             error!("Invalid instruction detected: {:b}", instruction);
                         }
