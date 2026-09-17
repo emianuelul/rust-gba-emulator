@@ -274,18 +274,22 @@ impl CPU {
 
 // ARM B, BX Logic
 impl CPU {
+    fn b_convert_u24_to_i32(&self, value: u32) -> i32 {
+        ((value << 8) as i32) >> 8
+    }
+
     fn b_execute_op(&mut self, op: u8, n: u32) {
         if op == 0 {
             // B
             self.registers.pc =
-                (self.registers.pc as i32 + 4 + self.convert_u24_to_i32(n) * 4) as u32;
+                (self.registers.pc as i32 + 4 + self.b_convert_u24_to_i32(n) * 4) as u32;
 
             // 2S + 1N
         } else {
             // BX
             self.set_register_value(LR, self.registers.pc);
             self.registers.pc =
-                (self.registers.pc as i32 + 4 + self.convert_u24_to_i32(n) * 4) as u32;
+                (self.registers.pc as i32 + 4 + self.b_convert_u24_to_i32(n) * 4) as u32;
 
             // 2S + 1N
         }
@@ -313,11 +317,7 @@ impl CPU {
 
 // ARM ALU Logic
 impl CPU {
-    fn convert_u24_to_i32(&self, value: u32) -> i32 {
-        ((value << 8) as i32) >> 8
-    }
-
-    fn get_arm_operand_value(&self, index: usize, i: u8, r: u8) -> u32 {
+    fn alu_get_arm_operand_value(&self, index: usize, i: u8, r: u8) -> u32 {
         if index == PC {
             if i == 0 && r == 1 {
                 self.registers.pc + 8
@@ -337,7 +337,7 @@ impl CPU {
         self.set_cpsr_bit(N_FLAG, n_bit);
     }
 
-    fn rrx(&mut self, to_shift: u32) -> u32 {
+    fn alu_rrx(&mut self, to_shift: u32) -> u32 {
         let old_c = self.get_cpsr_bit(C_FLAG);
         let lsb = (to_shift & 1) as u8;
         self.set_cpsr_bit(C_FLAG, lsb);
@@ -345,7 +345,7 @@ impl CPU {
         (to_shift >> 1) | ((old_c as u32) << 31)
     }
 
-    fn execute_alu_op(&mut self, opcode: u8, rn_value: u32, rd: u8, op2: u32, s: u8) {
+    fn alu_execute_op(&mut self, opcode: u8, rn_value: u32, rd: u8, op2: u32, s: u8) {
         let mode: CPUMode = self.get_cpu_mode();
 
         let s: u8 = if s == 1 && rd == 15 {
@@ -618,7 +618,7 @@ impl CPU {
         }
     }
 
-    fn apply_alu_shift(
+    fn alu_apply_shift(
         &mut self,
         shift_type: u8,
         to_shift: u32,
@@ -691,7 +691,7 @@ impl CPU {
 
             3 => {
                 if amount == 0 && imm {
-                    self.rrx(to_shift)
+                    self.alu_rrx(to_shift)
                 } else if amount == 0 {
                     to_shift
                 } else {
@@ -709,7 +709,7 @@ impl CPU {
 
 // ARM MUL Logic
 impl CPU {
-    fn execute_mul_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
+    fn mul_execute_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
         let rs_value = self.get_register_value(rs as usize);
         let rm_value = self.get_register_value(rm as usize);
 
@@ -921,7 +921,7 @@ impl CPU {
 
 // ARM PSR Transfer Logic
 impl CPU {
-    fn psr_get_new_psr(
+    fn psrt_get_new_psr(
         &self,
         psr: u32,
         op: u32,
@@ -952,7 +952,7 @@ impl CPU {
         first_byte << 24 | second_byte << 16 | third_byte << 8 | fourth_byte
     }
 
-    fn psr_execute_msr_op(&mut self, p: u8, op: u32, write_arr: [u8; 4]) {
+    fn psrt_execute_msr_op(&mut self, p: u8, op: u32, write_arr: [u8; 4]) {
         let curr_mode = self.get_effective_cpu_mode();
         if p == 1 && curr_mode == CPUMode::UserSys {
             error!("Called MSR with SPSR but current mode is User/Sys");
@@ -965,7 +965,7 @@ impl CPU {
             *self.spsr.get(&self.get_effective_cpu_mode()).unwrap()
         };
 
-        let new_psr: u32 = self.psr_get_new_psr(
+        let new_psr: u32 = self.psrt_get_new_psr(
             psr,
             op,
             write_arr[0],
@@ -981,7 +981,7 @@ impl CPU {
         }
     }
 
-    fn psr_execute_mrs_op(&mut self, p: u8, rd: u8) {
+    fn psrt_execute_mrs_op(&mut self, p: u8, rd: u8) {
         let curr_mode = self.get_effective_cpu_mode();
         if p == 1 && curr_mode == CPUMode::UserSys {
             error!("Called MRS with SPSR in User/Sys mode");
@@ -1051,7 +1051,7 @@ impl CPU {
                         // alu (i = 1)
                         "????_00_1_oooo_s_rrrr_dddd_hhhh_nnnnnnnn" => {
                             let opcode = o as u8;
-                            let rn = self.get_arm_operand_value(r as usize, 1, 0);
+                            let rn = self.alu_get_arm_operand_value(r as usize, 1, 0);
                             let rd = d as u8;
                             let imm = n;
                             let op2 = imm.rotate_right(h * 2);
@@ -1061,7 +1061,7 @@ impl CPU {
                                 self.set_cpsr_bit(C_FLAG, carry_bit);
                             }
 
-                            self.execute_alu_op(opcode, rn, rd, op2, s as u8);
+                            self.alu_execute_op(opcode, rn, rd, op2, s as u8);
 
                             // (1+p)S+rI+pN
                         }
@@ -1069,12 +1069,12 @@ impl CPU {
                         // alu (i = 0, r = 0)
                         "????_00_0_oooo_s_rrrr_dddd_hhhhh_tt_0_nnnn" => {
                             let opcode = o as u8;
-                            let rn = self.get_arm_operand_value(r as usize, 0, 0);
+                            let rn = self.alu_get_arm_operand_value(r as usize, 0, 0);
                             let rd = d as u8;
-                            let rm = self.get_arm_operand_value(n as usize, 0, 0);
+                            let rm = self.alu_get_arm_operand_value(n as usize, 0, 0);
                             let shift = h;
                             let shift_type = t;
-                            let op2 = self.apply_alu_shift(
+                            let op2 = self.alu_apply_shift(
                                 shift_type as u8,
                                 rm,
                                 shift as u8,
@@ -1082,7 +1082,7 @@ impl CPU {
                                 s as u8,
                             );
 
-                            self.execute_alu_op(opcode, rn, rd, op2, s as u8);
+                            self.alu_execute_op(opcode, rn, rd, op2, s as u8);
 
                             // (1+p)S+rI+pN
                         }
@@ -1090,12 +1090,12 @@ impl CPU {
                         // alu (i = 0, r = 1)
                         "????_00_0_oooo_s_rrrr_dddd_hhhh_0_tt_1_nnnn" => {
                             let opcode = o as u8;
-                            let rn = self.get_arm_operand_value(r as usize, 0, 1);
+                            let rn = self.alu_get_arm_operand_value(r as usize, 0, 1);
                             let rd = d as u8;
-                            let rm = self.get_arm_operand_value(n as usize, 0, 1);
+                            let rm = self.alu_get_arm_operand_value(n as usize, 0, 1);
                             let rs = self.get_register_value(h as usize) & 0xff;
                             let shift_type = t;
-                            let op2 = self.apply_alu_shift(
+                            let op2 = self.alu_apply_shift(
                                 shift_type as u8,
                                 rm,
                                 rs as u8,
@@ -1103,7 +1103,7 @@ impl CPU {
                                 s as u8,
                             );
 
-                            self.execute_alu_op(opcode, rn, rd, op2, s as u8);
+                            self.alu_execute_op(opcode, rn, rd, op2, s as u8);
 
                             // (1+p)S+rI+pN
                         }
@@ -1116,7 +1116,7 @@ impl CPU {
                             let rs = f as u8;
                             let rm = m as u8;
 
-                            self.execute_mul_op(op, rd, rn, rs, rm, s as u8);
+                            self.mul_execute_op(op, rd, rn, rs, rm, s as u8);
 
                             // MUL - 1S + mI
                             // MLA + MULL (UMULL, SMULL) - 1S + (m+1)I
@@ -1125,7 +1125,7 @@ impl CPU {
 
                         // PSR Transfer (i = 0, MRS)
                         "????_00_0_10_p_0_0_1111_dddd_000000000000" => {
-                            self.psr_execute_mrs_op(p as u8, d as u8);
+                            self.psrt_execute_mrs_op(p as u8, d as u8);
 
                             // 1S
                         }
@@ -1134,7 +1134,7 @@ impl CPU {
                         "????_00_0_10_p_1_0_f_s_x_c_1111_00000000_mmmm" => {
                             let op = self.get_register_value(m as usize);
 
-                            self.psr_execute_msr_op(
+                            self.psrt_execute_msr_op(
                                 p as u8,
                                 op,
                                 [f as u8, s as u8, x as u8, c as u8],
@@ -1147,7 +1147,7 @@ impl CPU {
                         "????_00_1_10_p_1_0_f_s_x_c_1111_hhhh_iiiiiiii" => {
                             let op = i.rotate_right(h * 2);
 
-                            self.psr_execute_msr_op(
+                            self.psrt_execute_msr_op(
                                 p as u8,
                                 op,
                                 [f as u8, s as u8, x as u8, c as u8],
