@@ -272,6 +272,26 @@ impl CPU {
     }
 }
 
+// ARM B, BX Logic
+impl CPU {
+    fn b_handle_op(&mut self, op: u8, n: u32) {
+        if op == 0 {
+            // B
+            self.registers.pc =
+                (self.registers.pc as i32 + 4 + self.convert_u24_to_i32(n) * 4) as u32;
+
+            // 2S + 1N
+        } else {
+            // BX
+            self.set_register_value(LR, self.registers.pc);
+            self.registers.pc =
+                (self.registers.pc as i32 + 4 + self.convert_u24_to_i32(n) * 4) as u32;
+
+            // 2S + 1N
+        }
+    }
+}
+
 // ARM ALU Logic
 impl CPU {
     fn convert_u24_to_i32(&self, value: u32) -> i32 {
@@ -668,7 +688,7 @@ impl CPU {
     }
 }
 
-// MUL Logic
+// ARM MUL Logic
 impl CPU {
     fn execute_mul_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
         let rs_value = self.get_register_value(rs as usize);
@@ -880,7 +900,7 @@ impl CPU {
     }
 }
 
-// PSR Transfer Logic
+// ARM PSR Transfer Logic
 impl CPU {
     fn psr_get_new_psr(
         &self,
@@ -973,22 +993,8 @@ impl CPU {
                     #[bitmatch]
                     match instruction {
                         // B
-                        "????_101_0_nnnnnnnnnnnnnnnnnnnnnnnn" => {
-                            self.registers.pc =
-                                (self.registers.pc as i32 + 4 + self.convert_u24_to_i32(n) * 4)
-                                    as u32;
-
-                            // 2S + 1N
-                        }
-
-                        // BL
-                        "????_101_1_nnnnnnnnnnnnnnnnnnnnnnnn" => {
-                            self.set_register_value(LR, self.registers.pc);
-                            self.registers.pc =
-                                (self.registers.pc as i32 + 4 + self.convert_u24_to_i32(n) * 4)
-                                    as u32;
-
-                            // 2S + 1N
+                        "????_101_o_nnnnnnnnnnnnnnnnnnnnnnnn" => {
+                            self.b_handle_op(o as u8, n);
                         }
 
                         // BX
@@ -1063,7 +1069,6 @@ impl CPU {
                             let rd = d as u8;
                             let rm = self.get_arm_operand_value(n as usize, 0, 1);
                             let rs = self.get_register_value(h as usize) & 0xff;
-                            let set_condition = s as u8;
                             let shift_type = t;
                             let op2 = self.apply_alu_shift(
                                 shift_type as u8,
@@ -1090,7 +1095,7 @@ impl CPU {
                         }
 
                         // PSR Transfer (i = 0, MRS)
-                        "????_00_0_10_p_0_0_1111_dddd_0000000000000" => {
+                        "????_00_0_10_p_0_0_1111_dddd_000000000000" => {
                             let psr = if p == 0 {
                                 self.cpsr
                             } else {
