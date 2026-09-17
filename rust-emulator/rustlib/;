@@ -274,7 +274,7 @@ impl CPU {
 
 // ARM B, BX Logic
 impl CPU {
-    fn b_execute_op(&mut self, op: u8, n: u32) {
+    fn b_handle_op(&mut self, op: u8, n: u32) {
         if op == 0 {
             // B
             self.registers.pc =
@@ -289,25 +289,6 @@ impl CPU {
 
             // 2S + 1N
         }
-    }
-
-    fn b_execute_bx(&mut self, n: u8) {
-        if n == 15 {
-            self.registers.pc += 4;
-            // 2S + 1N
-        }
-
-        let register_value = self.get_register_value(n as usize);
-
-        if register_value % 2 == 1 {
-            self.set_cpsr_bit(T_FLAG, 1);
-            self.registers.pc = register_value & !1;
-        } else {
-            self.set_cpsr_bit(T_FLAG, 0);
-            self.registers.pc = register_value & !3;
-        }
-
-        // 2S + 1N
     }
 }
 
@@ -926,40 +907,43 @@ impl CPU {
         psr: u32,
         op: u32,
         flags: u8,
-        _status: u8,
-        _extension: u8,
+        status: u8,
+        extension: u8,
         control: u8,
     ) -> u32 {
         let op_bytes = op.to_be_bytes();
         let psr_bytes = psr.to_be_bytes();
         let curr_mode = self.get_cpu_mode();
 
-        let byte_mask: u8 = 0b00100000;
+        let byte_mask = 0b00100000;
 
         let first_byte = if flags == 1 {
             psr_bytes[0] as u32
         } else {
             op_bytes[0] as u32
         };
-        let second_byte = psr_bytes[1] as u32;
-        let third_byte = psr_bytes[2] as u32;
+        let second_byte = if status == 1 && curr_mode != CPUMode::User {
+            psr_bytes[1] as u32
+        } else {
+            op_bytes[1] as u32
+        };
+        let third_byte = if extension == 1 && curr_mode != CPUMode::User {
+            psr_bytes[2] as u32
+        } else {
+            op_bytes[2] as u32
+        };
         let fourth_byte = if control == 1 && curr_mode != CPUMode::User {
             psr_bytes[3] as u32
         } else {
-            ((op_bytes[3] & !byte_mask) | (psr_bytes[3] & byte_mask)) as u32
+            op_bytes[3] as u32 & !mask | (psr_bytes[3] & mask)
         };
 
         first_byte << 24 | second_byte << 16 | third_byte << 8 | fourth_byte
     }
 
-    fn psr_execute_msr_op(&mut self, p: u8, op: u32, write_arr: [u8; 4]) {
+    fn psr_handle_msr_op(&mut self, p: u8, op: u32, write_arr: [u8; 4]) {
         let curr_mode = self.get_effective_cpu_mode();
-        if p == 1 && curr_mode == CPUMode::UserSys {
-            error!("Called MSR with SPSR but current mode is User/Sys");
-            return;
-        }
-
-        let psr = if p == 0 {
+        let psr = if p == 0 || (p == 1 && curr_mode == CPUMode::UserSys) {
             self.cpsr
         } else {
             *self.spsr.get(&self.get_effective_cpu_mode()).unwrap()
@@ -979,22 +963,6 @@ impl CPU {
         } else {
             self.spsr.insert(self.get_effective_cpu_mode(), new_psr);
         }
-    }
-
-    fn psr_execute_mrs_op(&mut self, p: u8, rd: u8) {
-        let curr_mode = self.get_effective_cpu_mode();
-        if p == 1 && curr_mode == CPUMode::UserSys {
-            error!("Called MRS with SPSR in User/Sys mode");
-            return;
-        }
-
-        let psr = if p == 0 {
-            self.cpsr
-        } else {
-            *self.spsr.get(&self.get_effective_cpu_mode()).unwrap()
-        };
-
-        self.set_register_value(rd as usize, psr);
     }
 }
 
@@ -1028,16 +996,27 @@ impl CPU {
                 if self.check_condition(c as u8) {
                     #[bitmatch]
                     match instruction {
-                        // B / BL
+                        // B
                         "????_101_o_nnnnnnnnnnnnnnnnnnnnnnnn" => {
-                            self.b_execute_op(o as u8, n);
-
-                            // 2S + 1N
+                            self.b_handle_op(o as u8, n);
                         }
 
                         // BX
                         "????_0001_0010_1111_1111_1111_0001_nnnn" => {
-                            self.b_execute_bx(n as u8);
+                            if n == 15 {
+                                self.registers.pc += 4;
+                                // 2S + 1N
+                            }
+
+                            let register_value = self.get_register_value(n as usize);
+
+                            if register_value % 2 == 1 {
+                                self.set_cpsr_bit(T_FLAG, 1);
+                                self.registers.pc = register_value & !1;
+                            } else {
+                                self.set_cpsr_bit(T_FLAG, 0);
+                                self.registers.pc = register_value & !3;
+                            }
 
                             // 2S + 1N
                         }
@@ -1117,43 +1096,40 @@ impl CPU {
                             let rm = m as u8;
 
                             self.execute_mul_op(op, rd, rn, rs, rm, s as u8);
-
-                            // MUL - 1S + mI
-                            // MLA + MULL (UMULL, SMULL) - 1S + (m+1)I
-                            // MLAL (UMLAL, SMLAL) - 1S + (m+2)I
                         }
 
                         // PSR Transfer (i = 0, MRS)
                         "????_00_0_10_p_0_0_1111_dddd_000000000000" => {
-                            self.psr_execute_mrs_op(p as u8, d as u8);
+                            let psr = if p == 0 {
+                                self.cpsr
+                            } else {
+                                *self.spsr.get(&self.get_effective_cpu_mode()).unwrap()
+                            };
+                            let rd = d as u8;
 
-                            // 1S
+                            self.set_register_value(rd as usize, psr);
                         }
 
                         // PSR Transfer (i = 0, MSR)
                         "????_00_0_10_p_1_0_f_s_x_c_1111_00000000_mmmm" => {
                             let op = self.get_register_value(m as usize);
 
-                            self.psr_execute_msr_op(
+                            self.psr_handle_msr_op(
                                 p as u8,
                                 op,
                                 [f as u8, s as u8, x as u8, c as u8],
                             );
-
-                            // 1S
                         }
 
                         // PSR Transfer (i = 1, MSR)
                         "????_00_1_10_p_1_0_f_s_x_c_1111_hhhh_iiiiiiii" => {
                             let op = i.rotate_right(h * 2);
 
-                            self.psr_execute_msr_op(
+                            self.psr_handle_msr_op(
                                 p as u8,
                                 op,
                                 [f as u8, s as u8, x as u8, c as u8],
                             );
-
-                            // 1S
                         }
                         _ => {
                             error!("Invalid instruction detected: {:b}", instruction);
