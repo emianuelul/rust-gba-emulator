@@ -998,12 +998,128 @@ impl CPU {
     }
 }
 
+// ARM Single Data Transfer
+impl CPU {
+    // flags
+    // 0 - P (pre / post indexing)
+    // 1 - U (up / down bit)
+    // 2 - B (byte / word)
+    // 3 - X (writeback)
+    fn sdt_execute_imm_ldr(
+        &mut self,
+        memory: &mut GBAMemory,
+        flags: [u8; 4],
+        rn: usize,
+        rd: usize,
+        operand: u32,
+    ) {
+        let rn_value = if rn == PC {
+            self.registers.pc + 4
+        } else {
+            self.get_register_value(rn)
+        };
+
+        let read_addr;
+        if flags[0] == 0 {
+            // post indexing
+            read_addr = rn_value;
+
+            if flags[2] == 0 {
+                self.set_register_value(rd, memory.read32(read_addr).0);
+            } else {
+                self.set_register_value(rd, memory.read8(read_addr).0 as u32);
+            }
+
+            self.set_register_value(rn, (read_addr as i32 + operand as i32) as u32);
+        } else {
+            // pre indexing
+            read_addr = (rn_value as i32 + operand as i32) as u32;
+
+            if flags[2] == 0 {
+                self.set_register_value(rd, memory.read32(read_addr).0);
+            } else {
+                self.set_register_value(rd, memory.read8(read_addr).0 as u32);
+            }
+
+            if flags[3] == 1 {
+                self.set_register_value(rn, read_addr);
+            }
+        }
+    }
+
+    fn sdt_execute_imm_str(
+        &mut self,
+        memory: &mut GBAMemory,
+        flags: [u8; 4],
+        rn: usize,
+        rd: usize,
+        operand: u32,
+    ) {
+        let rn_value = if rn == PC {
+            self.registers.pc + 4
+        } else {
+            self.get_register_value(rn)
+        };
+
+        let rd_value = if rd == PC {
+            self.registers.pc + 8
+        } else {
+            self.get_register_value(rd)
+        };
+
+        let addr;
+        let data = rd_value;
+
+        if flags[0] == 0 {
+            // post indexing
+            addr = rn_value;
+
+            if flags[2] == 0 {
+                memory.write32(addr, data);
+            } else {
+                memory.write8(addr, data.to_be_bytes()[3]);
+            }
+
+            self.set_register_value(rn, (addr as i32 + operand as i32) as u32);
+        } else {
+            // pre indexing
+            addr = (rn_value as i32 + operand as i32) as u32;
+
+            if flags[2] == 0 {
+                memory.write32(addr, data);
+            } else {
+                memory.write8(addr, data.to_be_bytes()[3]);
+            }
+
+            if flags[3] == 1 {
+                self.set_register_value(rn, addr);
+            }
+        }
+    }
+
+    fn sdt_execute_imm_op(
+        &mut self,
+        memory: &mut GBAMemory,
+        rn: usize,
+        rd: usize,
+        opcode: u8,
+        flags: [u8; 4],
+        operand: u32,
+    ) {
+        if opcode == 0 {
+            self.sdt_execute_imm_str(memory, flags, rn, rd, operand);
+        } else {
+            self.sdt_execute_imm_ldr(memory, flags, rn, rd, operand);
+        }
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
 impl CPU {
     #[bitmatch]
-    pub fn step(&mut self, memory: &GBAMemory) -> u32 {
+    pub fn step(&mut self, memory: &mut GBAMemory) -> u32 {
         if self.registers.pc >= memory.get_rom_size() as u32 {
             error!(
                 "PC tried to go over allowed memory limit {:x?}",
@@ -1155,6 +1271,26 @@ impl CPU {
 
                             // 1S
                         }
+
+                        // LDR, STR (i = 0) (immediate offset)
+                        "????_01_0_p_u_b_x_o_nnnn_dddd_iiiiiiiiiiii" => {
+                            let imm = if u == 0 {
+                                -(i as i32)
+                            } else {
+                                i as i32
+                            };
+
+                            self.sdt_execute_imm_op(
+                                memory,
+                                n as usize,
+                                d as usize,
+                                o as u8,
+                                [p as u8, u as u8, b as u8, x as u8],
+                                imm as u32,
+                            );
+                        }
+
+                        //
                         _ => {
                             error!("Invalid instruction detected: {:b}", instruction);
                         }
