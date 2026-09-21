@@ -1000,6 +1000,60 @@ impl CPU {
 
 // ARM Single Data Transfer
 impl CPU {
+    fn sdt_rrx(&mut self, to_shift: u32) -> u32 {
+        let old_c = self.get_cpsr_bit(C_FLAG);
+
+        (to_shift >> 1) | ((old_c as u32) << 31)
+    }
+
+    fn sdt_apply_shift(&mut self, to_shift: u32, amount: u8, shift_type: u8) -> u32 {
+        match shift_type {
+            0 => {
+                if amount == 0 {
+                    to_shift
+                } else if amount >= 32 {
+                    0
+                } else {
+                    to_shift << amount
+                }
+            }
+
+            1 => {
+                if amount >= 32 || amount == 0 {
+                    0
+                } else if amount == 0 {
+                    to_shift
+                } else {
+                    to_shift >> amount
+                }
+            }
+
+            2 => {
+                if amount >= 32 || amount == 0 {
+                    let first_bit = (to_shift >> 31) & 1;
+                    if first_bit == 1 {
+                        u32::MAX
+                    } else {
+                        0
+                    }
+                } else if amount == 0 {
+                    to_shift
+                } else {
+                    (to_shift as i32 >> amount) as u32
+                }
+            }
+
+            3 => {
+                if amount == 0 {
+                    self.sdt_rrx(to_shift)
+                } else {
+                    to_shift.rotate_right(amount as u32)
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
     fn sdt_get_aligned_addr(&self, addr: u32) -> u32 {
         addr & !0b11
     }
@@ -1047,7 +1101,7 @@ impl CPU {
     // 1 - U (up / down bit)
     // 2 - B (byte / word)
     // 3 - X (writeback)
-    fn sdt_execute_imm_ldr(
+    fn sdt_execute_ldr(
         &mut self,
         memory: &mut GBAMemory,
         flags: [u8; 4],
@@ -1093,7 +1147,7 @@ impl CPU {
         clk
     }
 
-    fn sdt_execute_imm_str(
+    fn sdt_execute_str(
         &mut self,
         memory: &mut GBAMemory,
         flags: [u8; 4],
@@ -1143,7 +1197,7 @@ impl CPU {
         clk
     }
 
-    fn sdt_execute_imm_op(
+    fn sdt_execute_op(
         &mut self,
         memory: &mut GBAMemory,
         rn: usize,
@@ -1153,9 +1207,9 @@ impl CPU {
         operand: u32,
     ) -> u32 {
         if opcode == 0 {
-            self.sdt_execute_imm_str(memory, flags, rn, rd, operand)
+            self.sdt_execute_str(memory, flags, rn, rd, operand)
         } else {
-            self.sdt_execute_imm_ldr(memory, flags, rn, rd, operand)
+            self.sdt_execute_ldr(memory, flags, rn, rd, operand)
         }
     }
 }
@@ -1318,7 +1372,7 @@ impl CPU {
                             // 1S
                         }
 
-                        // LDR, STR (i = 0) (immediate offset)
+                        // SDT - LDR, STR (i = 0) (immediate offset)
                         "????_01_0_p_u_b_x_o_nnnn_dddd_iiiiiiiiiiii" => {
                             let imm = if u == 0 {
                                 -(i as i32)
@@ -1326,7 +1380,7 @@ impl CPU {
                                 i as i32
                             };
 
-                            self.sdt_execute_imm_op(
+                            self.sdt_execute_op(
                                 memory,
                                 n as usize,
                                 d as usize,
@@ -1334,6 +1388,30 @@ impl CPU {
                                 [p as u8, u as u8, b as u8, x as u8],
                                 imm as u32,
                             );
+                        }
+
+                        // SDT - LDR STR (i = 1) (shifted immediate offset)
+                        "????_01_1_p_u_b_x_o_nnnn_dddd_iiiii_ss_0_mmmm" => {
+                            if m as usize == PC {
+                                error!("Called SDR/LDR with I = 1 and Rm = PC");
+                            } else {
+                                let rm_value = self.get_register_value(m as usize);
+                                let shifted = self.sdt_apply_shift(rm_value, i as u8, s as u8);
+                                let operand = if u == 0 {
+                                    -(shifted as i32)
+                                } else {
+                                    shifted as i32
+                                } as u32;
+
+                                self.sdt_execute_op(
+                                    memory,
+                                    n as usize,
+                                    d as usize,
+                                    o as u8,
+                                    [p as u8, u as u8, b as u8, x as u8],
+                                    operand,
+                                );
+                            };
                         }
 
                         //
