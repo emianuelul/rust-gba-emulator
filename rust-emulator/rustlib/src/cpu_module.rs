@@ -1214,6 +1214,127 @@ impl CPU {
     }
 }
 
+// ARM HSDT
+impl CPU {
+    fn hsdt_strh(
+        &mut self,
+        memory: &mut GBAMemory,
+        rn: usize,
+        rd: usize,
+        offset: i32,
+        flags: [u8; 4],
+    ) {
+        let rn_value = if rn == PC {
+            self.registers.pc + 4
+        } else {
+            self.get_register_value(rn)
+        };
+        let rd_value = if rd == PC {
+            self.registers.pc + 8
+        } else {
+            self.get_register_value(rd)
+        };
+
+        let addr = if flags[0] == 0 {
+            rn_value
+        } else {
+            (rn_value as i32 + offset) as u32
+        };
+
+        memory.write16(addr, rd_value as u16);
+
+        if flags[0] == 0 {
+            self.set_register_value(rn, (addr as i32 + offset) as u32);
+        } else {
+            if flags[2] == 1 {
+                self.set_register_value(rn, addr);
+            }
+        }
+    }
+
+    fn hsdt_ldr_op(
+        &mut self,
+        memory: &mut GBAMemory,
+        rn: usize,
+        rd: usize,
+        offset: i32,
+        opcode: u8,
+        flags: [u8; 4],
+    ) {
+        let rn_value = if rn == PC {
+            self.registers.pc + 4
+        } else {
+            self.get_register_value(rn)
+        };
+
+        let addr = if flags[0] == 0 {
+            rn_value
+        } else {
+            (rn_value as i32 + offset) as u32
+        };
+
+        let data = if opcode == 0b01 {
+            memory.read16(addr).0 as u32
+        } else if opcode == 0b10 {
+            memory.read8(addr).0 as i8 as i32 as u32
+        } else {
+            memory.read16(addr).0 as i16 as i32 as u32
+        };
+
+        self.set_register_value(rd, data);
+
+        if flags[0] == 0 {
+            self.set_register_value(rn, (addr as i32 + offset) as u32);
+        } else {
+            if flags[2] == 1 {
+                self.set_register_value(rn, addr);
+            }
+        }
+    }
+
+    // p - pre-post
+    // u - up-down
+    // w - writeback
+    // l - load-store
+    fn hsdt_execute_op(
+        &mut self,
+        memory: &mut GBAMemory,
+        flags: [u8; 4],
+        rn: usize,
+        rd: usize,
+        opcode: u8,
+        offset: i32,
+    ) {
+        if flags[3] == 0 {
+            match opcode {
+                // STRH
+                0b01 => {
+                    self.hsdt_strh(memory, rn, rd, offset, flags);
+                }
+
+                _ => {
+                    error!("Opcode: {:b} used in store mode", opcode);
+                }
+            }
+        } else {
+            match opcode {
+                0b00 => {
+                    warn!("Reserved opcode for L = 1: {:b}", opcode);
+                }
+
+                // LDRH | LDRSB | LDRSH
+                0b01..=0b11 => {
+                    self.hsdt_ldr_op(memory, rn, rd, offset, opcode, flags);
+                }
+
+                _ => {
+                    unreachable!()
+                }
+            }
+        }
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
@@ -1414,7 +1535,33 @@ impl CPU {
                             };
                         }
 
-                        //
+                        // HWord Signed Data Transfer
+                        "????_000_p_u_i_w_l_nnnn_dddd_aaaa_1_oo_1_bbbb" => {
+                            let offset: i32 = if i == 0 {
+                                if u == 0 {
+                                    -(self.get_register_value(b as usize) as i32)
+                                } else {
+                                    self.get_register_value(b as usize) as i32
+                                }
+                            } else {
+                                let full_imm = a << 4 | b;
+                                if u == 0 {
+                                    -(full_imm as i32)
+                                } else {
+                                    full_imm as i32
+                                }
+                            };
+
+                            self.hsdt_execute_op(
+                                memory,
+                                [p as u8, u as u8, w as u8, l as u8],
+                                n as usize,
+                                d as usize,
+                                o as u8,
+                                offset,
+                            );
+                        }
+
                         _ => {
                             error!("Invalid instruction detected: {:b}", instruction);
                         }
