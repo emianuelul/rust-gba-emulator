@@ -1000,6 +1000,48 @@ impl CPU {
 
 // ARM Single Data Transfer
 impl CPU {
+    fn sdt_get_aligned_addr(&self, addr: u32) -> u32 {
+        addr & !0b11
+    }
+
+    // read.1 and write return clk times from mem acc
+
+    fn sdt_read_data(&self, memory: &mut GBAMemory, addr: u32, byte_word: u8) -> (u32, u32) {
+        if !addr.is_multiple_of(4) {
+            if byte_word == 0 {
+                let result = memory.read32(self.sdt_get_aligned_addr(addr));
+                (result.0.rotate_right(8 * (addr % 4)), result.1)
+            } else {
+                let result = memory.read8(addr);
+                (result.0 as u32, result.1)
+            }
+        } else {
+            if byte_word == 0 {
+                memory.read32(addr)
+            } else {
+                let result = memory.read8(addr);
+                (result.0 as u32, result.1)
+            }
+        }
+    }
+
+    fn sdt_write_data(&self, memory: &mut GBAMemory, addr: u32, data: u32, byte_word: u8) -> u32 {
+        if !addr.is_multiple_of(4) {
+            if byte_word == 0 {
+                let addr = self.sdt_get_aligned_addr(addr);
+                memory.write32(addr, data)
+            } else {
+                memory.write8(addr, data as u8)
+            }
+        } else {
+            if byte_word == 0 {
+                memory.write32(addr, data)
+            } else {
+                memory.write8(addr, data as u8)
+            }
+        }
+    }
+
     // flags
     // 0 - P (pre / post indexing)
     // 1 - U (up / down bit)
@@ -1012,7 +1054,8 @@ impl CPU {
         rn: usize,
         rd: usize,
         operand: u32,
-    ) {
+    ) -> u32 {
+        let mut clk: u32 = 0;
         let rn_value = if rn == PC {
             self.registers.pc + 4
         } else {
@@ -1024,27 +1067,30 @@ impl CPU {
             // post indexing
             read_addr = rn_value;
 
-            if flags[2] == 0 {
-                self.set_register_value(rd, memory.read32(read_addr).0);
-            } else {
-                self.set_register_value(rd, memory.read8(read_addr).0 as u32);
-            }
+            let (data, io_clk) = self.sdt_read_data(memory, read_addr, flags[2]);
+
+            self.set_register_value(rd, data);
 
             self.set_register_value(rn, (read_addr as i32 + operand as i32) as u32);
+
+            clk += io_clk;
         } else {
             // pre indexing
             read_addr = (rn_value as i32 + operand as i32) as u32;
 
-            if flags[2] == 0 {
-                self.set_register_value(rd, memory.read32(read_addr).0);
-            } else {
-                self.set_register_value(rd, memory.read8(read_addr).0 as u32);
-            }
+            let (data, io_clk) = self.sdt_read_data(memory, read_addr, flags[2]);
+
+            self.set_register_value(rd, data);
 
             if flags[3] == 1 {
                 self.set_register_value(rn, read_addr);
             }
+
+            clk += io_clk;
         }
+
+        // clk + 1S + 1N + 1I
+        clk
     }
 
     fn sdt_execute_imm_str(
@@ -1054,7 +1100,9 @@ impl CPU {
         rn: usize,
         rd: usize,
         operand: u32,
-    ) {
+    ) -> u32 {
+        let mut clk: u32 = 0;
+
         let rn_value = if rn == PC {
             self.registers.pc + 4
         } else {
@@ -1067,34 +1115,32 @@ impl CPU {
             self.get_register_value(rd)
         };
 
-        let addr;
         let data = rd_value;
 
         if flags[0] == 0 {
             // post indexing
-            addr = rn_value;
+            let addr = rn_value;
 
-            if flags[2] == 0 {
-                memory.write32(addr, data);
-            } else {
-                memory.write8(addr, data.to_be_bytes()[3]);
-            }
+            let io_clk = self.sdt_write_data(memory, addr, data, flags[2]);
 
             self.set_register_value(rn, (addr as i32 + operand as i32) as u32);
+
+            clk += io_clk;
         } else {
             // pre indexing
-            addr = (rn_value as i32 + operand as i32) as u32;
+            let addr = (rn_value as i32 + operand as i32) as u32;
 
-            if flags[2] == 0 {
-                memory.write32(addr, data);
-            } else {
-                memory.write8(addr, data.to_be_bytes()[3]);
-            }
+            let io_clk = self.sdt_write_data(memory, addr, data, flags[2]);
 
             if flags[3] == 1 {
                 self.set_register_value(rn, addr);
             }
+
+            clk += io_clk;
         }
+
+        // clk + 2N
+        clk
     }
 
     fn sdt_execute_imm_op(
@@ -1105,11 +1151,11 @@ impl CPU {
         opcode: u8,
         flags: [u8; 4],
         operand: u32,
-    ) {
+    ) -> u32 {
         if opcode == 0 {
-            self.sdt_execute_imm_str(memory, flags, rn, rd, operand);
+            self.sdt_execute_imm_str(memory, flags, rn, rd, operand)
         } else {
-            self.sdt_execute_imm_ldr(memory, flags, rn, rd, operand);
+            self.sdt_execute_imm_ldr(memory, flags, rn, rd, operand)
         }
     }
 }
