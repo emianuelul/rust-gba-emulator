@@ -1223,7 +1223,9 @@ impl CPU {
         rd: usize,
         offset: i32,
         flags: [u8; 4],
-    ) {
+    ) -> u32 {
+        let mut clk: u32 = 0;
+
         let rn_value = if rn == PC {
             self.registers.pc + 4
         } else {
@@ -1241,7 +1243,7 @@ impl CPU {
             (rn_value as i32 + offset) as u32
         };
 
-        memory.write16(addr, rd_value as u16);
+        clk += memory.write16(addr, rd_value as u16);
 
         if flags[0] == 0 {
             self.set_register_value(rn, (addr as i32 + offset) as u32);
@@ -1250,6 +1252,9 @@ impl CPU {
                 self.set_register_value(rn, addr);
             }
         }
+
+        // clk + 2N
+        clk
     }
 
     fn hsdt_ldr_op(
@@ -1260,8 +1265,11 @@ impl CPU {
         offset: i32,
         opcode: u8,
         flags: [u8; 4],
-    ) {
+    ) -> u32 {
+        let mut clk: u32 = 0;
+
         let rn_value = if rn == PC {
+            // clk += (1S + 1N)
             self.registers.pc + 4
         } else {
             self.get_register_value(rn)
@@ -1273,13 +1281,18 @@ impl CPU {
             (rn_value as i32 + offset) as u32
         };
 
-        let data = if opcode == 0b01 {
-            memory.read16(addr).0 as u32
+        let (data, io) = if opcode == 0b01 {
+            let result = memory.read16(addr);
+            (result.0 as u32, result.1)
         } else if opcode == 0b10 {
-            memory.read8(addr).0 as i8 as i32 as u32
+            let result = memory.read8(addr);
+            (result.0 as i8 as i32 as u32, result.1)
         } else {
-            memory.read16(addr).0 as i16 as i32 as u32
+            let result = memory.read16(addr);
+            (result.0 as i16 as i32 as u32, result.1)
         };
+
+        clk += io;
 
         self.set_register_value(rd, data);
 
@@ -1290,6 +1303,9 @@ impl CPU {
                 self.set_register_value(rn, addr);
             }
         }
+
+        // clk += (1S + 1N + 1I)
+        clk
     }
 
     // p - pre-post
@@ -1304,12 +1320,14 @@ impl CPU {
         rd: usize,
         opcode: u8,
         offset: i32,
-    ) {
+    ) -> u32 {
+        let mut clk = 0;
+
         if flags[3] == 0 {
             match opcode {
                 // STRH
                 0b01 => {
-                    self.hsdt_strh(memory, rn, rd, offset, flags);
+                    clk += self.hsdt_strh(memory, rn, rd, offset, flags);
                 }
 
                 _ => {
@@ -1324,7 +1342,7 @@ impl CPU {
 
                 // LDRH | LDRSB | LDRSH
                 0b01..=0b11 => {
-                    self.hsdt_ldr_op(memory, rn, rd, offset, opcode, flags);
+                    clk += self.hsdt_ldr_op(memory, rn, rd, offset, opcode, flags);
                 }
 
                 _ => {
@@ -1332,6 +1350,8 @@ impl CPU {
                 }
             }
         }
+
+        clk
     }
 }
 
