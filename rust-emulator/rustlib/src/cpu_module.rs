@@ -1435,7 +1435,9 @@ impl CPU {
         opcode: u8,
         flags: [u8; 4],
         rn: usize,
-    ) {
+    ) -> u32 {
+        let mut clk: u32 = 0;
+
         let rn_value = self.get_register_value(rn);
         let s_bit = flags[2] == 1 && self.get_effective_cpu_mode() != CPUMode::UserSys;
         let was_empty = rlist.is_empty();
@@ -1471,12 +1473,14 @@ impl CPU {
                         self.get_register_value(val)
                     };
 
-                    memory.write32(addr, data);
+                    clk += memory.write32(addr, data);
                 }
 
                 if flags[3] == 1 && !s_bit {
                     self.set_register_value(rn, writeback_addr);
                 }
+
+                // clk += (n-1)S + 2N
             }
 
             // LDM
@@ -1487,10 +1491,13 @@ impl CPU {
                     let addr: u32 = start_addr + 4 * index as u32;
 
                     if s_bit && value == PC {
+                        // clk += 1S + 1N
                         self.cpsr = *self.spsr.get(&self.get_effective_cpu_mode()).unwrap();
                     }
 
-                    let data = memory.read32(addr).0;
+                    let (data, mem_clk) = memory.read32(addr);
+                    clk += mem_clk;
+
                     if s_bit && !change_psr {
                         self.set_user_register_value(value, data);
                     } else {
@@ -1505,12 +1512,16 @@ impl CPU {
                         self.set_register_value(rn, writeback_addr);
                     }
                 }
+
+                // clk += nS + 1N + 1I
             }
 
             _ => {
                 unreachable!();
             }
         }
+
+        clk
     }
 }
 
