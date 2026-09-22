@@ -1773,6 +1773,33 @@ impl CPU {
                             );
                         }
 
+                        // SWP
+                        "????_00010_b_00_nnnn_dddd_00001001_mmmm" => {
+                            let byte_word = b as u8;
+                            let rn = n as usize;
+                            let rd = d as usize;
+                            let rm = m as usize;
+                            let rn_value = self.get_register_value(rn);
+                            let rm_value = self.get_register_value(rm);
+
+                            let (data, mem_clk) = if byte_word == 0 {
+                                memory.read32(rn_value)
+                            } else {
+                                let x = memory.read8(rn_value);
+                                (x.0 as u32, x.1)
+                            };
+                            clk += mem_clk;
+
+                            self.set_register_value(rd, data);
+
+                            let mem_clk = if byte_word == 0 {
+                                memory.write32(rn_value, rm_value)
+                            } else {
+                                memory.write8(rn_value, rm_value as u8)
+                            };
+                            clk += mem_clk;
+                        }
+
                         _ => {
                             error!("Invalid instruction detected: {:b}", instruction);
                         }
