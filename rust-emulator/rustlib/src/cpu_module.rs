@@ -129,6 +129,33 @@ impl CPU {
         }
     }
 
+    fn set_user_register_value(&mut self, index: usize, data: u32) {
+        match index {
+            0..8 => self.registers.common[index] = data,
+            8..=12 => {
+                self.registers.common[index] = data;
+            }
+            13..=14 => {
+                let value = self.registers.pointers.get(&CPUMode::UserSys).unwrap();
+
+                if index == 13 {
+                    self.registers
+                        .pointers
+                        .insert(CPUMode::UserSys, (data, value.1));
+                } else {
+                    self.registers
+                        .pointers
+                        .insert(CPUMode::UserSys, (value.0, data));
+                }
+            }
+            PC => self.registers.pc = data,
+
+            _ => {
+                error!("CPU Register read index out of bounds: {}", index);
+            }
+        }
+    }
+
     fn get_register_value(&self, index: usize) -> u32 {
         let curr_mode = self.get_effective_cpu_mode();
         match index {
@@ -142,6 +169,28 @@ impl CPU {
             }
             13..=14 => {
                 let value = self.registers.pointers.get(&curr_mode).unwrap();
+
+                if index == 13 {
+                    value.0
+                } else {
+                    value.1
+                }
+            }
+            PC => self.registers.pc,
+
+            _ => {
+                error!("CPU Register read index out of bounds: {}", index);
+                0
+            }
+        }
+    }
+
+    fn get_user_register_value(&self, index: usize) -> u32 {
+        match index {
+            0..8 => self.registers.common[index],
+            8..=12 => self.registers.common[index],
+            13..=14 => {
+                let value = self.registers.pointers.get(&CPUMode::UserSys).unwrap();
 
                 if index == 13 {
                     value.0
@@ -1355,6 +1404,116 @@ impl CPU {
     }
 }
 
+// ARM Block Data Transfer
+impl CPU {
+    fn bdt_get_start_addr(
+        &self,
+        block_size: usize,
+        pre_post: u8,
+        up_down: u8,
+        rn_value: u32,
+    ) -> u32 {
+        match (pre_post, up_down) {
+            (0, 1) => rn_value,
+            (1, 1) => rn_value + 4,
+            (0, 0) => rn_value - block_size as u32 + 4,
+            (1, 0) => rn_value - block_size as u32,
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+
+    // p - pre-post
+    // u - up_down
+    // s - load psr
+    // w - write-back
+    fn bdt_execute_op(
+        &mut self,
+        memory: &mut GBAMemory,
+        rlist: &mut Vec<usize>,
+        opcode: u8,
+        flags: [u8; 4],
+        rn: usize,
+    ) {
+        let rn_value = self.get_register_value(rn);
+        let s_bit = flags[2] == 1 && self.get_effective_cpu_mode() != CPUMode::UserSys;
+        let was_empty = rlist.is_empty();
+        if was_empty {
+            rlist.push(PC);
+        }
+
+        let block_size = 4 * rlist.len();
+        let start_addr = self.bdt_get_start_addr(block_size, flags[0], flags[1], rn_value);
+        let writeback_addr = if was_empty {
+            if flags[1] == 1 {
+                rn_value.wrapping_add(0x40)
+            } else {
+                rn_value.wrapping_sub(0x40)
+            }
+        } else {
+            start_addr + block_size as u32
+        };
+
+        match opcode {
+            // STM - [rn+offset] = rlist[current_index]
+            0 => {
+                let new_base = start_addr + block_size as u32;
+
+                for (index, &val) in rlist.iter().enumerate() {
+                    let addr: u32 = start_addr + 4 * index as u32;
+
+                    let data: u32 = if s_bit {
+                        self.get_user_register_value(val)
+                    } else if val == rn && index > 0 && flags[3] == 1 {
+                        new_base
+                    } else {
+                        self.get_register_value(val)
+                    };
+
+                    memory.write32(addr, data);
+                }
+
+                if flags[3] == 1 && !s_bit {
+                    self.set_register_value(rn, writeback_addr);
+                }
+            }
+
+            // LDM
+            1 => {
+                let change_psr = rlist.contains(&PC) && s_bit;
+
+                for (index, &value) in rlist.iter().enumerate() {
+                    let addr: u32 = start_addr + 4 * index as u32;
+
+                    if s_bit && value == PC {
+                        self.cpsr = *self.spsr.get(&self.get_effective_cpu_mode()).unwrap();
+                    }
+
+                    let data = memory.read32(addr).0;
+                    if s_bit && !change_psr {
+                        self.set_user_register_value(value, data);
+                    } else {
+                        self.set_register_value(value, data);
+                    }
+                }
+
+                if flags[3] == 1 && !rlist.contains(&rn) {
+                    if s_bit && !change_psr {
+                        self.set_user_register_value(rn, writeback_addr);
+                    } else {
+                        self.set_register_value(rn, writeback_addr);
+                    }
+                }
+            }
+
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
@@ -1555,7 +1714,7 @@ impl CPU {
                             };
                         }
 
-                        // HWord Signed Data Transfer
+                        // HWord Signed Data Transfer (LDRH, LDRSH, LDRSB, STRH)
                         "????_000_p_u_i_w_l_nnnn_dddd_aaaa_1_oo_1_bbbb" => {
                             let offset: i32 = if i == 0 {
                                 if u == 0 {
@@ -1579,6 +1738,27 @@ impl CPU {
                                 d as usize,
                                 o as u8,
                                 offset,
+                            );
+                        }
+
+                        // Block Data Transfer (LDM, STM)
+                        "????_100_p_u_s_w_o_nnnn_rrrrrrrrrrrrrrrr" => {
+                            let rlist_bitmask = r as u16;
+
+                            let mut rlist: Vec<usize> = Vec::new();
+                            for i in 0..16 {
+                                let bit = (rlist_bitmask >> i) & 1;
+                                if bit == 1 {
+                                    rlist.push(i as usize);
+                                }
+                            }
+
+                            self.bdt_execute_op(
+                                memory,
+                                &mut rlist,
+                                o as u8,
+                                [p as u8, u as u8, s as u8, w as u8],
+                                n as usize,
                             );
                         }
 
