@@ -1525,6 +1525,43 @@ impl CPU {
     }
 }
 
+// ARM SWP Logic
+impl CPU {
+    fn swp_execute(
+        &mut self,
+        memory: &mut GBAMemory,
+        byte_word: u8,
+        rn: usize,
+        rd: usize,
+        rm: usize,
+    ) -> u32 {
+        let mut clk: u32 = 0;
+
+        let rn_value = self.get_register_value(rn);
+        let rm_value = self.get_register_value(rm);
+
+        let (data, mem_clk) = if byte_word == 0 {
+            memory.read32(rn_value)
+        } else {
+            let x = memory.read8(rn_value);
+            (x.0 as u32, x.1)
+        };
+        clk += mem_clk;
+
+        self.set_register_value(rd, data);
+
+        let mem_clk = if byte_word == 0 {
+            memory.write32(rn_value, rm_value)
+        } else {
+            memory.write8(rn_value, rm_value as u8)
+        };
+        clk += mem_clk;
+
+        // 1S + 2N + 1I
+        clk
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
@@ -1775,29 +1812,7 @@ impl CPU {
 
                         // SWP
                         "????_00010_b_00_nnnn_dddd_00001001_mmmm" => {
-                            let byte_word = b as u8;
-                            let rn = n as usize;
-                            let rd = d as usize;
-                            let rm = m as usize;
-                            let rn_value = self.get_register_value(rn);
-                            let rm_value = self.get_register_value(rm);
-
-                            let (data, mem_clk) = if byte_word == 0 {
-                                memory.read32(rn_value)
-                            } else {
-                                let x = memory.read8(rn_value);
-                                (x.0 as u32, x.1)
-                            };
-                            clk += mem_clk;
-
-                            self.set_register_value(rd, data);
-
-                            let mem_clk = if byte_word == 0 {
-                                memory.write32(rn_value, rm_value)
-                            } else {
-                                memory.write8(rn_value, rm_value as u8)
-                            };
-                            clk += mem_clk;
+                            self.swp_execute(memory, b as u8, n as usize, d as usize, m as usize);
                         }
 
                         _ => {
