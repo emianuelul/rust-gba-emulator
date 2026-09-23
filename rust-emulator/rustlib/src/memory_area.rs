@@ -80,6 +80,10 @@ impl GBAMemory {
     pub fn get_rom_size(&self) -> usize {
         self.external.rom.len()
     }
+
+    pub fn get_rom_end_addr(&self) -> usize {
+        0x08000000 + self.external.rom.len()
+    }
 }
 
 fn align16(addr: u32) -> u32 {

@@ -1,7 +1,7 @@
 use crate::memory_area::GBAMemory;
 use bitmatch::bitmatch;
 use std::collections::HashMap;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 // fetch
 //   V
@@ -58,14 +58,14 @@ impl CPURegisters {
             common: [0; 13].to_vec(),
             fiq: [0; 5].to_vec(),
             pointers: HashMap::from([
-                (CPUMode::UserSys, (0, 0)),
-                (CPUMode::Fiq, (0, 0)),
-                (CPUMode::Supervisor, (0, 0)),
-                (CPUMode::Abort, (0, 0)),
-                (CPUMode::Irq, (0, 0)),
-                (CPUMode::Undefined, (0, 0)),
+                (CPUMode::UserSys, (0x03007F00, 0)),
+                (CPUMode::Fiq, (0x03007F00 - 0x60, 0)),
+                (CPUMode::Supervisor, (0x03007F00 - 0x60 * 2, 0)),
+                (CPUMode::Abort, (0x03007F00 - 0x60 * 3, 0)),
+                (CPUMode::Irq, (0x03007F00 - 0x60 * 4, 0)),
+                (CPUMode::Undefined, (0x03007F00 - 0x60 * 5, 0)),
             ]),
-            pc: 0,
+            pc: 0x08000000,
         }
     }
 }
@@ -156,7 +156,7 @@ impl CPU {
         }
     }
 
-    fn get_register_value(&self, index: usize) -> u32 {
+    pub fn get_register_value(&self, index: usize) -> u32 {
         let curr_mode = self.get_effective_cpu_mode();
         match index {
             0..8 => self.registers.common[index],
@@ -1068,7 +1068,7 @@ impl CPU {
             }
 
             1 => {
-                if amount >= 32 || amount == 0 {
+                if amount >= 32 {
                     0
                 } else if amount == 0 {
                     to_shift
@@ -1415,9 +1415,9 @@ impl CPU {
     ) -> u32 {
         match (pre_post, up_down) {
             (0, 1) => rn_value,
-            (1, 1) => rn_value + 4,
-            (0, 0) => rn_value - block_size as u32 + 4,
-            (1, 0) => rn_value - block_size as u32,
+            (1, 1) => rn_value.wrapping_add(4),
+            (0, 0) => rn_value.wrapping_sub(block_size as u32).wrapping_add(4),
+            (1, 0) => rn_value.wrapping_sub(block_size as u32),
             _ => {
                 unreachable!();
             }
@@ -1454,21 +1454,26 @@ impl CPU {
                 rn_value.wrapping_sub(0x40)
             }
         } else {
-            start_addr + block_size as u32
+            match (flags[0], flags[1]) {
+                (0, 1) | (1, 1) => rn_value.wrapping_add(block_size as u32),
+                (0, 0) | (1, 0) => rn_value.wrapping_sub(block_size as u32),
+                _ => unreachable!(),
+            }
         };
 
         match opcode {
             // STM - [rn+offset] = rlist[current_index]
             0 => {
-                let new_base = start_addr + block_size as u32;
+                let lowest = rlist.iter().min().copied();
+                let rn_is_lowest = lowest == Some(rn);
 
                 for (index, &val) in rlist.iter().enumerate() {
                     let addr: u32 = start_addr + 4 * index as u32;
 
                     let data: u32 = if s_bit {
                         self.get_user_register_value(val)
-                    } else if val == rn && index > 0 && flags[3] == 1 {
-                        new_base
+                    } else if val == rn && rn_is_lowest {
+                        writeback_addr
                     } else {
                         self.get_register_value(val)
                     };
@@ -1498,6 +1503,12 @@ impl CPU {
                     let (data, mem_clk) = memory.read32(addr);
                     clk += mem_clk;
 
+                    let data = if value == PC {
+                        data & !3
+                    } else {
+                        data
+                    };
+
                     if s_bit && !change_psr {
                         self.set_user_register_value(value, data);
                     } else {
@@ -1505,12 +1516,8 @@ impl CPU {
                     }
                 }
 
-                if flags[3] == 1 && !rlist.contains(&rn) {
-                    if s_bit && !change_psr {
-                        self.set_user_register_value(rn, writeback_addr);
-                    } else {
-                        self.set_register_value(rn, writeback_addr);
-                    }
+                if (change_psr || !s_bit) && !rlist.contains(&rn) && flags[3] == 1 {
+                    self.set_register_value(rn, writeback_addr);
                 }
 
                 // clk += nS + 1N + 1I
@@ -1568,21 +1575,18 @@ impl CPU {
 impl CPU {
     #[bitmatch]
     pub fn step(&mut self, memory: &mut GBAMemory) -> u32 {
-        if self.registers.pc >= memory.get_rom_size() as u32 {
-            error!(
-                "PC tried to go over allowed memory limit {:x?}",
-                self.registers.pc
-            );
-            return 0;
-        }
-
         let mut clk: u32 = 0;
 
         match self.get_cpu_state() {
             CPUState::Arm => {
-                // fetch
+                // FETCH
                 let (instruction, read) = memory.read32(self.get_register_value(PC));
                 clk += read;
+
+                println!(
+                    "STEP: PC=0x{:x}, instruction=0x{:x}",
+                    self.registers.pc, instruction
+                );
 
                 self.registers.pc += 4;
 
@@ -1608,7 +1612,7 @@ impl CPU {
 
                         // SWI
                         "????_1111_nnnnnnnnnnnnnnnnnnnnnnnn" => {
-                            todo!("Revisit after BIOS impl");
+                            println!("Called SWI but is not implemented yet");
                             // 2S + 1N
                         }
 
@@ -1820,7 +1824,6 @@ impl CPU {
                         }
                     }
                 } else {
-                    todo!("add clk + 1S");
                     // clk +1S
                 }
             }

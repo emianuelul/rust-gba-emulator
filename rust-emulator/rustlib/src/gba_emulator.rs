@@ -14,3 +14,9 @@ impl GBAEngine {
         }
     }
 }
+
+impl GBAEngine {
+    pub fn step(&mut self) {
+        self.cpu.step(&mut self.memory);
+    }
+}
