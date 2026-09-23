@@ -1,6 +1,7 @@
-use crate::{cpu_module::CPU, gba_emulator::GBAEngine, memory_area::GBAMemory};
-use std::fs;
+use crate::{cpu_module::CPU, memory_area::GBAMemory};
 
+pub mod constants;
+pub mod cpu_arm_ops;
 pub mod cpu_module;
 pub mod gba_emulator;
 pub mod memory_area;
@@ -15,7 +16,7 @@ mod tests {
 
     #[test]
     fn arm_tests() {
-        let rom = fs::read("/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_DataProcessing.gba")
+        let rom = std::fs::read("/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_DataProcessing.gba")
             .expect("ARM test not found");
 
         let mut mem = GBAMemory::new(rom);
