@@ -493,6 +493,78 @@ impl CPU {
 
         // clk = 1S
     }
+
+    fn ro_execute_mcas_op(&mut self, opcode: u8, rd: usize, imm: u8) {
+        match opcode {
+            // mov
+            0b00 => {
+                self.set_register_value(rd, imm as u32);
+
+                let n_bit = (((imm as u32) >> 31) & 1) as u8;
+                let z_bit = (imm == 0) as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+            }
+
+            // cmp
+            0b01 => {
+                let data = self.get_register_value(rd).overflowing_sub(imm as u32);
+
+                let n_bit = ((data.0 >> 31) & 1) as u8;
+                let z_bit = (data.0 == 0) as u8;
+                let c_bit = !data.1 as u8;
+                let v_bit =
+                    i32::overflowing_sub(self.get_register_value(rd) as i32, imm as i32).1 as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+            }
+
+            // add
+            0b10 => {
+                let old_rd_value = self.get_register_value(rd);
+
+                let data = self.get_register_value(rd).overflowing_add(imm as u32);
+                self.set_register_value(rd, data.0);
+
+                let n_bit = ((data.0 >> 31) & 1) as u8;
+                let z_bit = (data.0 == 0) as u8;
+                let c_bit = data.1 as u8;
+                let v_bit = i32::overflowing_add(old_rd_value as i32, imm as i32).1 as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+            }
+
+            // sub
+            0b11 => {
+                let old_rd_value = self.get_register_value(rd);
+                let data = self.get_register_value(rd).overflowing_sub(imm as u32);
+                self.set_register_value(rd, data.0);
+
+                let n_bit = ((data.0 >> 31) & 1) as u8;
+                let z_bit = (data.0 == 0) as u8;
+                let c_bit = !data.1 as u8;
+                let v_bit = i32::overflowing_sub(old_rd_value as i32, imm as i32).1 as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+            }
+
+            _ => {
+                unreachable!()
+            }
+        }
+
+        // clk += 1S
+    }
 }
 
 // Step Logic
@@ -785,6 +857,67 @@ impl CPU {
                         let rd = d as usize;
 
                         self.ro_execute_add_sub(opcode, rd, rs, operand);
+                    }
+
+                    // mov, cmp, add, sub
+                    "001_oo_ddd_nnnnnnnn" => {
+                        let opcode = o as u8;
+                        let rd = d as usize;
+                        let imm = n as u8;
+                        self.ro_execute_mcas_op(opcode, rd, imm);
+                    }
+
+                    // alu
+                    "010000_oooo_sss_ddd" => {
+                        let opcode = o as u8;
+                        let rs = s as usize;
+                        let rd = d as usize;
+
+                        let rs_value = self.get_register_value(rs);
+                        let rd_value = self.get_register_value(rd);
+                        match opcode {
+                            // and
+                            0x0 => {
+                                let data = rd_value & rs_value;
+                                self.set_register_value(rd, data);
+                            }
+
+                            // eor
+                            0x1 => {
+                                let data = rd_value ^ rs_value;
+                                self.set_register_value(rd, data);
+                            }
+
+                            // lsl
+                            0x2 => {
+                                let data = rd_value << (rs_value & 0xFF);
+                                self.set_register_value(rd, data);
+                            }
+
+                            // lsr
+                            0x3 => {
+                                let data = rd_value >> (rs_value & 0xFF);
+                                self.set_register_value(rd, data);
+                            }
+
+                            // asr
+                            0x4 => {
+                                let data = ((rd_value as i32) >> (rs_value & 0xFF)) as u32;
+                                self.set_register_value(rd, data);
+                            }
+
+                            // adc
+                            0x5 => {
+                                let (sum1, _c1) = rd_value.overflowing_add(rs_value);
+                                let (sum2, _c2) =
+                                    sum1.overflowing_add(self.get_cpsr_bit(C_FLAG) as u32);
+
+                                self.set_register_value(rd, sum2);
+                            }
+                            _ => {
+                                unreachable!()
+                            }
+                        }
                     }
 
                     _ => {
