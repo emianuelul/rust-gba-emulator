@@ -914,6 +914,73 @@ impl CPU {
 
                                 self.set_register_value(rd, sum2);
                             }
+
+                            // sbc
+                            0x6 => {
+                                let (sub1, _c1) = rd_value.overflowing_sub(rs_value);
+                                let (sub2, _c2) =
+                                    sub1.overflowing_sub(self.get_cpsr_bit(C_FLAG) as u32);
+
+                                self.set_register_value(rd, sub2);
+                            }
+
+                            // ror
+                            0x7 => {
+                                let data = rd_value.rotate_right(rs_value & 0xFF);
+
+                                self.set_register_value(rd, data);
+                            }
+
+                            // tst
+                            0x8 => {
+                                let _data = rd_value & rs_value;
+                            }
+
+                            // neg
+                            0x9 => {
+                                let data = -(rs_value as i32) as u32;
+
+                                self.set_register_value(rd, data);
+                            }
+
+                            // cmp
+                            0xA => {
+                                let _result = rd_value.overflowing_sub(rs_value);
+                            }
+
+                            // cmn
+                            0xB => {
+                                let _result = rd_value.overflowing_add(rs_value);
+                            }
+
+                            // orr
+                            0xC => {
+                                let data = rd_value | rs_value;
+
+                                self.set_register_value(rd, data);
+                            }
+
+                            // mul
+                            0xD => {
+                                let data = rd_value.overflowing_mul(rs_value);
+
+                                self.set_register_value(rd, data.0);
+                            }
+
+                            // bic
+                            0xE => {
+                                let data = rd_value & !rs_value;
+
+                                self.set_register_value(rd, data);
+                            }
+
+                            // mvn
+                            0xF => {
+                                let data = !rs_value;
+
+                                self.set_register_value(rd, data);
+                            }
+
                             _ => {
                                 unreachable!()
                             }
