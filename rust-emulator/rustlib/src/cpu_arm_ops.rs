@@ -68,15 +68,24 @@ impl CPU {
         self.set_cpsr_bit(N_FLAG, n_bit);
     }
 
-    fn alu_rrx(&mut self, to_shift: u32) -> u32 {
+    fn alu_rrx(&mut self, to_shift: u32, s: u8) -> u32 {
         let old_c = self.get_cpsr_bit(C_FLAG);
-        let lsb = (to_shift & 1) as u8;
-        self.set_cpsr_bit(C_FLAG, lsb);
+        if s == 1 {
+            self.set_cpsr_bit(C_FLAG, (to_shift & 1) as u8);
+        }
 
         (to_shift >> 1) | ((old_c as u32) << 31)
     }
 
-    pub fn alu_execute_op(&mut self, opcode: u8, rn_value: u32, rd: u8, op2: u32, s: u8) {
+    pub fn alu_execute_op(
+        &mut self,
+        opcode: u8,
+        rn_value: u32,
+        rd: u8,
+        op2: u32,
+        s: u8,
+        carry: u32,
+    ) {
         let mode: CPUMode = self.get_cpu_mode();
 
         let s: u8 = if s == 1 && rd == 15 {
@@ -172,23 +181,21 @@ impl CPU {
 
             // ADC
             0x5 => {
-                let data = rn_value
-                    .wrapping_add(op2)
-                    .wrapping_add(self.get_cpsr_bit(C_FLAG) as u32);
+                let full = rn_value as u64 + op2 as u64 + carry as u64;
+                let data = full as u32;
 
                 if s == 1 {
                     self.alu_set_n_z_flags(data);
 
-                    let (sum1, c1) = rn_value.overflowing_add(op2);
-                    let (_, c2) = sum1.overflowing_add(self.get_cpsr_bit(C_FLAG) as u32);
-                    let c_bit = c1 || c2;
+                    let c_bit = (full >> 32) as u8;
+                    let v_bit = if (rn_value >> 31 == op2 >> 31) && (data >> 31 != rn_value >> 31) {
+                        1
+                    } else {
+                        0
+                    };
 
-                    let (sum1, v1) = i32::overflowing_add(rn_value as i32, op2 as i32);
-                    let (_, v2) = i32::overflowing_add(sum1, self.get_cpsr_bit(C_FLAG) as i32);
-                    let v_bit = v1 || v2;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit as u8);
-                    self.set_cpsr_bit(V_FLAG, v_bit as u8);
+                    self.set_cpsr_bit(C_FLAG, c_bit);
+                    self.set_cpsr_bit(V_FLAG, v_bit);
                 }
 
                 self.set_register_value(rd as usize, data);
@@ -196,27 +203,21 @@ impl CPU {
 
             // SBC
             0x6 => {
-                let data = rn_value
-                    .wrapping_sub(op2)
-                    .wrapping_add((self.get_cpsr_bit(C_FLAG) as u32).wrapping_sub(1));
+                let borrow = 1 - carry;
+                let data = rn_value.wrapping_sub(op2).wrapping_sub(borrow);
 
                 if s == 1 {
                     self.alu_set_n_z_flags(data);
 
-                    let (sub1, c1) = rn_value.overflowing_sub(op2);
-                    let (_, c2) =
-                        sub1.overflowing_add((self.get_cpsr_bit(C_FLAG) as u32).wrapping_sub(1));
-                    let c_bit = !c1 || c2;
+                    let c_bit = (rn_value as u64 >= op2 as u64 + borrow as u64) as u8;
+                    let v_bit = if (rn_value >> 31 != op2 >> 31) && (data >> 31 != rn_value >> 31) {
+                        1
+                    } else {
+                        0
+                    };
 
-                    let (sub1, v1) = i32::overflowing_sub(rn_value as i32, op2 as i32);
-                    let (_, v2) = i32::overflowing_add(
-                        sub1,
-                        (self.get_cpsr_bit(C_FLAG) as i32).wrapping_sub(1),
-                    );
-                    let v_bit = v1 || v2;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit as u8);
-                    self.set_cpsr_bit(V_FLAG, v_bit as u8);
+                    self.set_cpsr_bit(C_FLAG, c_bit);
+                    self.set_cpsr_bit(V_FLAG, v_bit);
                 }
 
                 self.set_register_value(rd as usize, data);
@@ -224,27 +225,21 @@ impl CPU {
 
             // RSC
             0x7 => {
-                let data = op2
-                    .wrapping_sub(rn_value)
-                    .wrapping_add((self.get_cpsr_bit(C_FLAG) as u32).wrapping_sub(1));
+                let borrow = 1 - carry;
+                let data = op2.wrapping_sub(rn_value).wrapping_sub(borrow);
 
                 if s == 1 {
                     self.alu_set_n_z_flags(data);
 
-                    let (sub1, c1) = op2.overflowing_sub(rn_value);
-                    let (_, c2) =
-                        sub1.overflowing_add((self.get_cpsr_bit(C_FLAG) as u32).wrapping_sub(1));
-                    let c_bit = !c1 || c2;
+                    let c_bit = (op2 as u64 >= rn_value as u64 + borrow as u64) as u8;
+                    let v_bit = if (op2 >> 31 != rn_value >> 31) && (data >> 31 != op2 >> 31) {
+                        1
+                    } else {
+                        0
+                    };
 
-                    let (sub1, v1) = i32::overflowing_sub(op2 as i32, rn_value as i32);
-                    let (_, v2) = i32::overflowing_add(
-                        sub1,
-                        (self.get_cpsr_bit(C_FLAG) as i32).wrapping_sub(1),
-                    );
-                    let v_bit = v1 || v2;
-
-                    self.set_cpsr_bit(C_FLAG, c_bit as u8);
-                    self.set_cpsr_bit(V_FLAG, v_bit as u8);
+                    self.set_cpsr_bit(C_FLAG, c_bit);
+                    self.set_cpsr_bit(V_FLAG, v_bit);
                 }
 
                 self.set_register_value(rd as usize, data);
@@ -380,20 +375,31 @@ impl CPU {
             }
 
             1 => {
-                if amount >= 32 || (amount == 0 && imm) {
-                    if s == 1 {
-                        let carry_bit = ((to_shift >> 31) & 1) as u8;
-                        self.set_cpsr_bit(C_FLAG, carry_bit);
-                    }
-                    0
-                } else if amount == 0 {
-                    to_shift
+                let n = if amount == 0 && imm {
+                    32
                 } else {
-                    if s == 1 {
-                        let carry_bit = ((to_shift >> (amount - 1)) & 1) as u8;
-                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                    amount
+                };
+                match n {
+                    0 => to_shift,
+                    1..=31 => {
+                        if s == 1 {
+                            self.set_cpsr_bit(C_FLAG, ((to_shift >> (n - 1)) & 1) as u8);
+                        }
+                        to_shift >> n
                     }
-                    to_shift >> amount
+                    32 => {
+                        if s == 1 {
+                            self.set_cpsr_bit(C_FLAG, (to_shift >> 31) as u8);
+                        }
+                        0
+                    }
+                    _ => {
+                        if s == 1 {
+                            self.set_cpsr_bit(C_FLAG, 0);
+                        }
+                        0
+                    }
                 }
             }
 
@@ -422,15 +428,15 @@ impl CPU {
 
             3 => {
                 if amount == 0 && imm {
-                    self.alu_rrx(to_shift)
+                    self.alu_rrx(to_shift, s)
                 } else if amount == 0 {
                     to_shift
                 } else {
+                    let res = to_shift.rotate_right((amount & 31) as u32);
                     if s == 1 {
-                        let carry_bit = ((to_shift >> (amount - 1)) & 1) as u8;
-                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                        self.set_cpsr_bit(C_FLAG, (res >> 31) as u8);
                     }
-                    to_shift.rotate_right(amount as u32)
+                    res
                 }
             }
             _ => unreachable!(),
