@@ -35,7 +35,6 @@ pub enum CPUState {
 pub struct CPURegisters {
     pub common: Vec<u32>, // r0-r12
     pub fiq: Vec<u32>,    // r8-r12
-
     pub pointers: HashMap<CPUMode, (u32, u32)>,
     pub pc: u32,
 }
@@ -310,6 +309,192 @@ impl CPU {
     }
 }
 
+// THUMB Register Op Logic
+impl CPU {
+    fn ro_execute_move_shifted(&mut self, opcode: u8, rd: usize, rs: usize, offset: u8) {
+        let rs_value = self.get_register_value(rs);
+
+        let data: u32 = match opcode {
+            // lsl
+            0b00 => {
+                let value = if offset == 0 {
+                    rs_value
+                } else if offset >= 32 {
+                    0
+                } else {
+                    rs_value << offset
+                };
+
+                let n_bit: u8 = ((value >> 31) & 1) as u8;
+                let z_bit: u8 = (value == 0) as u8;
+                let c_bit: u8 = (rs_value & 1) as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+
+                value
+            }
+
+            // lsr
+            0b01 => {
+                let value = if offset == 0 || offset >= 32 {
+                    0
+                } else {
+                    rs_value >> offset
+                };
+                let n_bit: u8 = ((value >> 31) & 1) as u8;
+                let z_bit: u8 = (value == 0) as u8;
+                let c_bit: u8 = ((rs_value >> 31) & 1) as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                if offset != 0 {
+                    self.set_cpsr_bit(C_FLAG, c_bit);
+                }
+
+                value
+            }
+
+            // asr
+            0b10 => {
+                let value = if offset == 0 || offset >= 32 {
+                    let sign = (rs_value >> 31) & 1;
+                    if sign == 1 {
+                        u32::MAX
+                    } else {
+                        0
+                    }
+                } else {
+                    (rs_value as i32 >> offset) as u32
+                };
+
+                let n_bit: u8 = ((value >> 31) & 1) as u8;
+                let z_bit: u8 = (value == 0) as u8;
+                let c_bit: u8 = ((rs_value >> 31) & 1) as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+
+                value
+            }
+
+            _ => {
+                unreachable!()
+            }
+        };
+
+        self.set_register_value(rd, data);
+
+        // clk = 1S
+    }
+
+    fn ro_execute_add_sub(&mut self, opcode: u8, rd: usize, rs: usize, operand: u8) {
+        match opcode {
+            // ADD (operand is register value)
+            0b00 => {
+                let old_rs_value = self.get_register_value(rs);
+                let old_operand_value = self.get_register_value(operand as usize);
+
+                let data = old_rs_value.overflowing_add(old_operand_value);
+                self.set_register_value(rd, data.0);
+
+                let n_bit = ((data.0 >> 31) & 1) as u8;
+                let z_bit = (data.0 == 0) as u8;
+                let c_bit = data.1 as u8;
+                let v_bit =
+                    i32::overflowing_add(old_rs_value as i32, old_operand_value as i32).1 as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+            }
+
+            // SUB (operand is register value)
+            0b01 => {
+                let old_rs_value = self.get_register_value(rs);
+                let old_operand_value = self.get_register_value(operand as usize);
+
+                let data = old_rs_value.overflowing_sub(old_operand_value);
+                self.set_register_value(rd, data.0);
+
+                let n_bit = ((data.0 >> 31) & 1) as u8;
+                let z_bit = (data.0 == 0) as u8;
+                let c_bit = !data.1 as u8;
+                let v_bit =
+                    i32::overflowing_sub(old_rs_value as i32, old_operand_value as i32).1 as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+            }
+
+            // ADD (operand is imm)
+            0b10 => {
+                let old_rs_value = self.get_register_value(rs);
+
+                if operand == 0 {
+                    // MOV
+                    let data = self.get_register_value(rs);
+                    self.set_register_value(rd, data);
+
+                    let n_bit = ((data >> 31) & 1) as u8;
+                    let z_bit = (data == 0) as u8;
+                    let c_bit = 0;
+                    let v_bit = 0;
+
+                    self.set_cpsr_bit(N_FLAG, n_bit);
+                    self.set_cpsr_bit(Z_FLAG, z_bit);
+                    self.set_cpsr_bit(C_FLAG, c_bit);
+                    self.set_cpsr_bit(V_FLAG, v_bit);
+                } else {
+                    // ADD
+                    let data = old_rs_value.overflowing_add(operand as u32);
+                    self.set_register_value(rd, data.0);
+
+                    let n_bit = ((data.0 >> 31) & 1) as u8;
+                    let z_bit = (data.0 == 0) as u8;
+                    let c_bit = data.1 as u8;
+                    let v_bit = i32::overflowing_add(old_rs_value as i32, operand as i32).1 as u8;
+
+                    self.set_cpsr_bit(N_FLAG, n_bit);
+                    self.set_cpsr_bit(Z_FLAG, z_bit);
+                    self.set_cpsr_bit(C_FLAG, c_bit);
+                    self.set_cpsr_bit(V_FLAG, v_bit);
+                }
+            }
+
+            // SUB (operand is imm)
+            0b11 => {
+                let old_rs_value = self.get_register_value(rs);
+
+                let data = old_rs_value.overflowing_sub(operand as u32);
+                self.set_register_value(rd, data.0);
+
+                let n_bit = ((data.0 >> 31) & 1) as u8;
+                let z_bit = (data.0 == 0) as u8;
+                let c_bit = !data.1 as u8;
+                let v_bit = i32::overflowing_sub(old_rs_value as i32, operand as i32).1 as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+            }
+
+            //
+            _ => {
+                unreachable!()
+            }
+        }
+
+        // clk = 1S
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
@@ -568,8 +753,8 @@ impl CPU {
                     // clk +1S
                 }
             }
+
             CPUState::Thumb => {
-                // FETCH
                 let (instruction, read) = memory.read16(self.get_register_value(PC));
                 clk += read;
 
@@ -589,80 +774,17 @@ impl CPU {
                         let rs = s as usize;
                         let rd = d as usize;
 
-                        let rs_value = self.get_register_value(rs);
+                        self.ro_execute_move_shifted(opcode, rd, rs, offset);
+                    }
 
-                        let data: u32 = match opcode {
-                            // lsl
-                            0b00 => {
-                                let value = if offset == 0 {
-                                    rs_value
-                                } else if offset >= 32 {
-                                    0
-                                } else {
-                                    rs_value << offset
-                                };
+                    // ADD, SUB
+                    "00011_oo_nnn_sss_ddd" => {
+                        let opcode = o as u8;
+                        let operand = n as u8;
+                        let rs = s as usize;
+                        let rd = d as usize;
 
-                                let n_bit: u8 = ((value >> 31) & 1) as u8;
-                                let z_bit: u8 = (value == 0) as u8;
-                                let c_bit: u8 = (rs_value & 1) as u8;
-
-                                self.set_cpsr_bit(N_FLAG, n_bit);
-                                self.set_cpsr_bit(Z_FLAG, z_bit);
-                                self.set_cpsr_bit(C_FLAG, c_bit);
-
-                                value
-                            }
-
-                            // lsr
-                            0b01 => {
-                                let value = if offset == 0 || offset >= 32 {
-                                    0
-                                } else {
-                                    rs_value >> offset
-                                };
-                                let n_bit: u8 = ((value >> 31) & 1) as u8;
-                                let z_bit: u8 = (value == 0) as u8;
-                                let c_bit: u8 = ((rs_value >> 31) & 1) as u8;
-
-                                self.set_cpsr_bit(N_FLAG, n_bit);
-                                self.set_cpsr_bit(Z_FLAG, z_bit);
-                                if offset != 0 {
-                                    self.set_cpsr_bit(C_FLAG, c_bit);
-                                }
-
-                                value
-                            }
-
-                            // asr
-                            0b10 => {
-                                let value = if offset == 0 || offset >= 32 {
-                                    let sign = (rs_value >> 31) & 1;
-                                    if sign == 1 {
-                                        u32::MAX
-                                    } else {
-                                        0
-                                    }
-                                } else {
-                                    (rs_value as i32 >> offset) as u32
-                                };
-
-                                let n_bit: u8 = ((value >> 31) & 1) as u8;
-                                let z_bit: u8 = (value == 0) as u8;
-                                let c_bit: u8 = ((rs_value >> 31) & 1) as u8;
-
-                                self.set_cpsr_bit(N_FLAG, n_bit);
-                                self.set_cpsr_bit(Z_FLAG, z_bit);
-                                self.set_cpsr_bit(C_FLAG, c_bit);
-
-                                value
-                            }
-
-                            _ => {
-                                unreachable!()
-                            }
-                        };
-
-                        self.set_register_value(rd, data);
+                        self.ro_execute_add_sub(opcode, rd, rs, operand);
                     }
 
                     _ => {
