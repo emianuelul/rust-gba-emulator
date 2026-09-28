@@ -583,6 +583,289 @@ impl CPU {
         self.set_cpsr_bit(N_FLAG, n_bit);
         self.set_cpsr_bit(Z_FLAG, z_bit);
     }
+
+    fn ro_execute_alu_op(&mut self, opcode: u8, rs: usize, rd: usize) {
+        let rs_value = self.get_register_value(rs);
+        let rd_value = self.get_register_value(rd);
+        // let mut clk: u32 = 1S;
+        match opcode {
+            // and
+            0x0 => {
+                let data = rd_value & rs_value;
+                self.ro_set_nz_flags(data);
+                self.set_register_value(rd, data);
+            }
+
+            // eor
+            0x1 => {
+                let data = rd_value ^ rs_value;
+                self.ro_set_nz_flags(data);
+                self.set_register_value(rd, data);
+            }
+
+            // lsl
+            0x2 => {
+                let n = rs_value & 0xFF;
+                let data = match n {
+                    0 => rd_value,
+                    1..=31 => {
+                        self.set_cpsr_bit(C_FLAG, ((rd_value >> (32 - n)) & 1) as u8);
+                        rd_value << n
+                    }
+                    32 => {
+                        self.set_cpsr_bit(C_FLAG, (rd_value & 1) as u8);
+                        0
+                    }
+                    _ => {
+                        self.set_cpsr_bit(C_FLAG, 0);
+                        0
+                    }
+                };
+                self.ro_set_nz_flags(data);
+                self.set_register_value(rd, data);
+            }
+
+            // lsr
+            0x3 => {
+                let n = rs_value & 0xFF;
+                let data = match n {
+                    0 => rd_value,
+                    1..=31 => {
+                        self.set_cpsr_bit(C_FLAG, ((rd_value >> (n - 1)) & 1) as u8);
+                        rd_value >> n
+                    }
+                    32 => {
+                        self.set_cpsr_bit(C_FLAG, (rd_value >> 31) as u8);
+                        0
+                    }
+                    _ => {
+                        self.set_cpsr_bit(C_FLAG, 0);
+                        0
+                    }
+                };
+                self.ro_set_nz_flags(data);
+                self.set_register_value(rd, data);
+            }
+
+            // asr
+            0x4 => {
+                let n = rs_value & 0xFF;
+                let data = match n {
+                    0 => rd_value,
+                    1..=31 => {
+                        self.set_cpsr_bit(C_FLAG, ((rd_value >> (n - 1)) & 1) as u8);
+                        ((rd_value as i32) >> n) as u32
+                    }
+                    _ => {
+                        self.set_cpsr_bit(C_FLAG, (rd_value >> 31) as u8);
+                        ((rd_value as i32) >> 31) as u32
+                    }
+                };
+                self.ro_set_nz_flags(data);
+                self.set_register_value(rd, data);
+            }
+
+            // adc
+            0x5 => {
+                let (sum1, c1) = rd_value.overflowing_add(rs_value);
+                let (sum2, c2) = sum1.overflowing_add(self.get_cpsr_bit(C_FLAG) as u32);
+                let c_bit = (c1 || c2) as u8;
+
+                let v_bit = if (rd_value >> 31 == rs_value >> 31) && (sum2 >> 31 != rd_value >> 31)
+                {
+                    1
+                } else {
+                    0
+                };
+
+                self.ro_set_nz_flags(sum2);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+
+                self.set_register_value(rd, sum2);
+            }
+
+            // sbc
+            0x6 => {
+                let borrow = 1 - self.get_cpsr_bit(C_FLAG) as u32;
+                let sub2 = rd_value.wrapping_sub(rs_value).wrapping_sub(borrow);
+
+                let c_bit = ((rd_value as u64) >= (rs_value as u64) + (borrow as u64)) as u8;
+
+                let v_bit = if (rd_value >> 31 != rs_value >> 31) && (sub2 >> 31 != rd_value >> 31)
+                {
+                    1
+                } else {
+                    0
+                };
+
+                self.ro_set_nz_flags(sub2);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+
+                self.set_register_value(rd, sub2);
+            }
+
+            // ror
+            0x7 => {
+                let n = rs_value & 0xFF;
+                let data = rd_value.rotate_right(n & 31);
+                self.ro_set_nz_flags(data);
+                if n != 0 {
+                    self.set_cpsr_bit(C_FLAG, (data >> 31) as u8);
+                }
+                self.set_register_value(rd, data);
+            }
+
+            // tst
+            0x8 => {
+                let data = rd_value & rs_value;
+                self.ro_set_nz_flags(data);
+            }
+
+            // neg
+            0x9 => {
+                let data = 0u32.overflowing_sub(rs_value);
+
+                let c_bit = !data.1 as u8;
+                let v_bit = i32::overflowing_sub(0, rs_value as i32).1 as u8;
+
+                self.ro_set_nz_flags(data.0);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+
+                self.set_register_value(rd, data.0);
+            }
+
+            // cmp
+            0xA => {
+                let data = rd_value.overflowing_sub(rs_value);
+
+                let c_bit = !data.1 as u8;
+                let v_bit = i32::overflowing_sub(rd_value as i32, rs_value as i32).1 as u8;
+
+                self.ro_set_nz_flags(data.0);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+            }
+
+            // cmn
+            0xB => {
+                let data = rd_value.overflowing_add(rs_value);
+
+                self.ro_set_nz_flags(data.0);
+                let c_bit = data.1 as u8;
+                let v_bit = i32::overflowing_add(rd_value as i32, rs_value as i32).1 as u8;
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+            }
+
+            // orr
+            0xC => {
+                let data = rd_value | rs_value;
+                self.ro_set_nz_flags(data);
+                self.set_register_value(rd, data);
+            }
+
+            // mul
+            0xD => {
+                let data = rd_value.overflowing_mul(rs_value).0;
+                self.ro_set_nz_flags(data);
+                self.set_register_value(rd, data);
+
+                // clk += mI
+            }
+
+            // bic
+            0xE => {
+                let data = rd_value & !rs_value;
+                self.ro_set_nz_flags(data);
+                self.set_register_value(rd, data);
+            }
+
+            // mvn
+            0xF => {
+                let data = !rs_value;
+                self.ro_set_nz_flags(data);
+                self.set_register_value(rd, data);
+            }
+
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+
+    fn ro_execute_hi_reg(&mut self, opcode: u8, msbd: usize, msbs: usize, rs: usize, rd: usize) {
+        let rd = msbd << 3 | rd;
+        let rd_value = self.get_register_value(rd);
+
+        let rs = msbs << 3 | rs;
+        let rs_value = self.get_register_value(rs);
+
+        match opcode {
+            // add
+            0b00 => {
+                let data = rd_value.wrapping_add(rs_value);
+                if rd == PC {
+                    self.registers.pc = data & !1;
+                    // clk += 2S + 1N
+                } else {
+                    self.set_register_value(rd, data);
+                    // clk += 1S
+                }
+            }
+
+            // cmp
+            0b01 => {
+                let tuple = rd_value.overflowing_sub(rs_value);
+                let data = tuple.0;
+
+                let n_bit = ((data >> 31) & 1) as u8;
+                let z_bit = (data == 0) as u8;
+                let c_bit = !tuple.1 as u8;
+                let v_bit = i32::overflowing_sub(rd_value as i32, rs_value as i32).1 as u8;
+
+                self.set_cpsr_bit(N_FLAG, n_bit);
+                self.set_cpsr_bit(Z_FLAG, z_bit);
+                self.set_cpsr_bit(C_FLAG, c_bit);
+                self.set_cpsr_bit(V_FLAG, v_bit);
+
+                // clk += 1S
+            }
+
+            // mov
+            0b10 => {
+                if rd == PC {
+                    self.registers.pc = rs_value & !1;
+                    // clk += 2S + 1N
+                } else {
+                    self.set_register_value(rd, rs_value);
+                    // clk += 1S
+                }
+            }
+
+            // bx
+            0b11 => {
+                let target = rs_value;
+                if target & 1 == 0 {
+                    // switch to ARM
+                    self.set_cpsr_bit(T_FLAG, 0);
+                    self.registers.pc = target & !3;
+                } else {
+                    // switch to THUMB
+                    self.set_cpsr_bit(T_FLAG, 1);
+                    self.registers.pc = target & !1;
+                }
+
+                // clk += 2S + 1N
+            }
+
+            _ => {
+                unreachable!();
+            }
+        }
+    }
 }
 
 // Step Logic
@@ -908,304 +1191,14 @@ impl CPU {
 
                     // alu
                     "010000_oooo_sss_ddd" => {
-                        let opcode = o as u8;
-                        let rs = s as usize;
-                        let rd = d as usize;
-
-                        let rs_value = self.get_register_value(rs);
-                        let rd_value = self.get_register_value(rd);
-                        // let mut clk: u32 = 1S;
-                        match opcode {
-                            // and
-                            0x0 => {
-                                let data = rd_value & rs_value;
-                                self.ro_set_nz_flags(data);
-                                self.set_register_value(rd, data);
-                            }
-
-                            // eor
-                            0x1 => {
-                                let data = rd_value ^ rs_value;
-                                self.ro_set_nz_flags(data);
-                                self.set_register_value(rd, data);
-                            }
-
-                            // lsl
-                            0x2 => {
-                                let n = rs_value & 0xFF;
-                                let data = match n {
-                                    0 => rd_value,
-                                    1..=31 => {
-                                        self.set_cpsr_bit(
-                                            C_FLAG,
-                                            ((rd_value >> (32 - n)) & 1) as u8,
-                                        );
-                                        rd_value << n
-                                    }
-                                    32 => {
-                                        self.set_cpsr_bit(C_FLAG, (rd_value & 1) as u8);
-                                        0
-                                    }
-                                    _ => {
-                                        self.set_cpsr_bit(C_FLAG, 0);
-                                        0
-                                    }
-                                };
-                                self.ro_set_nz_flags(data);
-                                self.set_register_value(rd, data);
-                            }
-
-                            // lsr
-                            0x3 => {
-                                let n = rs_value & 0xFF;
-                                let data = match n {
-                                    0 => rd_value,
-                                    1..=31 => {
-                                        self.set_cpsr_bit(
-                                            C_FLAG,
-                                            ((rd_value >> (n - 1)) & 1) as u8,
-                                        );
-                                        rd_value >> n
-                                    }
-                                    32 => {
-                                        self.set_cpsr_bit(C_FLAG, (rd_value >> 31) as u8);
-                                        0
-                                    }
-                                    _ => {
-                                        self.set_cpsr_bit(C_FLAG, 0);
-                                        0
-                                    }
-                                };
-                                self.ro_set_nz_flags(data);
-                                self.set_register_value(rd, data);
-                            }
-
-                            // asr
-                            0x4 => {
-                                let n = rs_value & 0xFF;
-                                let data = match n {
-                                    0 => rd_value,
-                                    1..=31 => {
-                                        self.set_cpsr_bit(
-                                            C_FLAG,
-                                            ((rd_value >> (n - 1)) & 1) as u8,
-                                        );
-                                        ((rd_value as i32) >> n) as u32
-                                    }
-                                    _ => {
-                                        self.set_cpsr_bit(C_FLAG, (rd_value >> 31) as u8);
-                                        ((rd_value as i32) >> 31) as u32
-                                    }
-                                };
-                                self.ro_set_nz_flags(data);
-                                self.set_register_value(rd, data);
-                            }
-
-                            // adc
-                            0x5 => {
-                                let (sum1, c1) = rd_value.overflowing_add(rs_value);
-                                let (sum2, c2) =
-                                    sum1.overflowing_add(self.get_cpsr_bit(C_FLAG) as u32);
-                                let c_bit = (c1 || c2) as u8;
-
-                                let v_bit = if (rd_value >> 31 == rs_value >> 31)
-                                    && (sum2 >> 31 != rd_value >> 31)
-                                {
-                                    1
-                                } else {
-                                    0
-                                };
-
-                                self.ro_set_nz_flags(sum2);
-                                self.set_cpsr_bit(C_FLAG, c_bit);
-                                self.set_cpsr_bit(V_FLAG, v_bit);
-
-                                self.set_register_value(rd, sum2);
-                            }
-
-                            // sbc
-                            0x6 => {
-                                let borrow = 1 - self.get_cpsr_bit(C_FLAG) as u32;
-                                let sub2 = rd_value.wrapping_sub(rs_value).wrapping_sub(borrow);
-
-                                let c_bit = ((rd_value as u64)
-                                    >= (rs_value as u64) + (borrow as u64))
-                                    as u8;
-
-                                let v_bit = if (rd_value >> 31 != rs_value >> 31)
-                                    && (sub2 >> 31 != rd_value >> 31)
-                                {
-                                    1
-                                } else {
-                                    0
-                                };
-
-                                self.ro_set_nz_flags(sub2);
-                                self.set_cpsr_bit(C_FLAG, c_bit);
-                                self.set_cpsr_bit(V_FLAG, v_bit);
-
-                                self.set_register_value(rd, sub2);
-                            }
-
-                            // ror
-                            0x7 => {
-                                let n = rs_value & 0xFF;
-                                let data = rd_value.rotate_right(n & 31);
-                                self.ro_set_nz_flags(data);
-                                if n != 0 {
-                                    self.set_cpsr_bit(C_FLAG, (data >> 31) as u8);
-                                }
-                                self.set_register_value(rd, data);
-                            }
-
-                            // tst
-                            0x8 => {
-                                let data = rd_value & rs_value;
-                                self.ro_set_nz_flags(data);
-                            }
-
-                            // neg
-                            0x9 => {
-                                let data = 0u32.overflowing_sub(rs_value);
-
-                                let c_bit = !data.1 as u8;
-                                let v_bit = i32::overflowing_sub(0, rs_value as i32).1 as u8;
-
-                                self.ro_set_nz_flags(data.0);
-                                self.set_cpsr_bit(C_FLAG, c_bit);
-                                self.set_cpsr_bit(V_FLAG, v_bit);
-
-                                self.set_register_value(rd, data.0);
-                            }
-
-                            // cmp
-                            0xA => {
-                                let data = rd_value.overflowing_sub(rs_value);
-
-                                let c_bit = !data.1 as u8;
-                                let v_bit =
-                                    i32::overflowing_sub(rd_value as i32, rs_value as i32).1 as u8;
-
-                                self.ro_set_nz_flags(data.0);
-                                self.set_cpsr_bit(C_FLAG, c_bit);
-                                self.set_cpsr_bit(V_FLAG, v_bit);
-                            }
-
-                            // cmn
-                            0xB => {
-                                let data = rd_value.overflowing_add(rs_value);
-
-                                self.ro_set_nz_flags(data.0);
-                                let c_bit = data.1 as u8;
-                                let v_bit =
-                                    i32::overflowing_add(rd_value as i32, rs_value as i32).1 as u8;
-                                self.set_cpsr_bit(C_FLAG, c_bit);
-                                self.set_cpsr_bit(V_FLAG, v_bit);
-                            }
-
-                            // orr
-                            0xC => {
-                                let data = rd_value | rs_value;
-                                self.ro_set_nz_flags(data);
-                                self.set_register_value(rd, data);
-                            }
-
-                            // mul
-                            0xD => {
-                                let data = rd_value.overflowing_mul(rs_value).0;
-                                self.ro_set_nz_flags(data);
-                                self.set_register_value(rd, data);
-
-                                // clk += mI
-                            }
-
-                            // bic
-                            0xE => {
-                                let data = rd_value & !rs_value;
-                                self.ro_set_nz_flags(data);
-                                self.set_register_value(rd, data);
-                            }
-
-                            // mvn
-                            0xF => {
-                                let data = !rs_value;
-                                self.ro_set_nz_flags(data);
-                                self.set_register_value(rd, data);
-                            }
-
-                            _ => {
-                                unreachable!()
-                            }
-                        }
+                        self.ro_execute_alu_op(o as u8, s as usize, d as usize);
                     }
 
+                    // hi register ops
                     "010001_oo_a_b_ccc_ddd" => {
-                        let opcode = o as u8;
-                        let msbd = a as usize;
-                        let msbs = b as usize;
-                        let rs = c as usize;
-                        let rd = d as usize;
-
-                        let rd = msbd << 3 | rd;
-                        let rd_value = self.get_register_value(rd);
-
-                        let rs = msbs << 3 | rs;
-                        let rs_value = self.get_register_value(rs);
-
-                        match opcode {
-                            // add
-                            0b00 => {
-                                let data = rd_value.wrapping_add(rs_value);
-                                self.set_register_value(rd, data);
-                            }
-
-                            // cmp
-                            0b01 => {
-                                let tuple = rd_value.overflowing_sub(rs_value);
-                                let data = tuple.0;
-
-                                let n_bit = ((data >> 31) & 1) as u8;
-                                let z_bit = (data == 0) as u8;
-                                let c_bit = !tuple.1 as u8;
-                                let v_bit =
-                                    i32::overflowing_sub(rd_value as i32, rs_value as i32).1 as u8;
-
-                                self.set_cpsr_bit(N_FLAG, n_bit);
-                                self.set_cpsr_bit(Z_FLAG, z_bit);
-                                self.set_cpsr_bit(C_FLAG, c_bit);
-                                self.set_cpsr_bit(V_FLAG, v_bit);
-                            }
-
-                            // mov
-                            0b10 => {
-                                if rd != rs {
-                                    let data = rs_value;
-                                    self.set_register_value(rd, data);
-                                }
-                            }
-
-                            // bx
-                            0b11 => {
-                                let jump_addr = if rs & 1 == 0 {
-                                    // switch to ARM state
-                                    self.set_cpsr_bit(T_FLAG, 0);
-
-                                    if rs == PC && rd_value & 3 != 0b000 {
-                                        self.registers.pc & !2
-                                    } else {
-                                        rs_value & !3
-                                    }
-                                } else {
-                                    rs_value
-                                };
-
-                                self.registers.pc = jump_addr;
-                            }
-
-                            _ => {
-                                unreachable!();
-                            }
-                        }
+                        self.ro_execute_hi_reg(
+                            o as u8, a as usize, b as usize, c as usize, d as usize,
+                        );
                     }
 
                     _ => {
