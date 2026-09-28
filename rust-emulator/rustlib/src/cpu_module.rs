@@ -868,6 +868,66 @@ impl CPU {
     }
 }
 
+// THUMB load/store logic
+impl CPU {
+    fn ls_execute_ro(
+        &mut self,
+        memory: &mut GBAMemory,
+        opcode: u8,
+        offset: usize,
+        rb: usize,
+        rd: usize,
+    ) {
+        let offset = self.get_register_value(offset);
+
+        match opcode {
+            // str
+            0b00 => {
+                let addr = self.get_register_value(rb).wrapping_add(offset);
+                let data = self.get_register_value(rd);
+
+                memory.write32(addr, data);
+            }
+
+            // strb
+            0b01 => {
+                let addr = self.get_register_value(rb).wrapping_add(offset);
+                let data = self.get_register_value(rd) as u8;
+
+                memory.write8(addr, data);
+            }
+
+            // ldr
+            0b10 => {
+                let data_addr = self.get_register_value(rb).wrapping_add(offset);
+                if data_addr & 3 != 0 {
+                    let aligned_addr = data_addr & !3;
+                    let data = memory.read32(aligned_addr).0;
+                    let data = data.rotate_right(8 * (data_addr & 3));
+
+                    self.set_register_value(rd, data);
+                } else {
+                    let data = memory.read32(data_addr).0;
+
+                    self.set_register_value(rd, data);
+                }
+            }
+
+            // ldrb
+            0b11 => {
+                let data_addr = self.get_register_value(rb).wrapping_add(offset);
+                let data = memory.read8(data_addr).0;
+
+                self.set_register_value(rd, data as u32);
+            }
+
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
@@ -1201,8 +1261,25 @@ impl CPU {
                         );
                     }
 
+                    // ldr (load imm from literal pool)
+                    "01001_ddd_nnnnnnnn" => {
+                        let rd = d as usize;
+                        let imm = (n as u32) << 2;
+                        let pc_value = self.registers.pc & !2;
+
+                        let data_addr = pc_value.wrapping_add(imm);
+                        let data = memory.read32(data_addr).0;
+
+                        self.set_register_value(rd, data);
+                    }
+
+                    // load/store with register offset
+                    "0101_oo_0_fff_bbb_ddd" => {
+                        self.ls_execute_ro(memory, o as u8, f as usize, b as usize, d as usize);
+                    }
+
                     _ => {
-                        error!("Invalid THUMB instructio detected: {:b}", instruction)
+                        error!("invalid thumb instructio detected: {:b}", instruction)
                     }
                 }
             }
