@@ -327,11 +327,17 @@ impl CPU {
 
                 let n_bit: u8 = ((value >> 31) & 1) as u8;
                 let z_bit: u8 = (value == 0) as u8;
-                let c_bit: u8 = (rs_value & 1) as u8;
+                let c_bit: u8 = if offset == 0 || offset > 32 {
+                    0
+                } else {
+                    ((rs_value >> (32 - offset)) & 1) as u8
+                };
 
                 self.set_cpsr_bit(N_FLAG, n_bit);
                 self.set_cpsr_bit(Z_FLAG, z_bit);
-                self.set_cpsr_bit(C_FLAG, c_bit);
+                if offset != 0 {
+                    self.set_cpsr_bit(C_FLAG, c_bit);
+                }
 
                 value
             }
@@ -345,13 +351,17 @@ impl CPU {
                 };
                 let n_bit: u8 = ((value >> 31) & 1) as u8;
                 let z_bit: u8 = (value == 0) as u8;
-                let c_bit: u8 = ((rs_value >> 31) & 1) as u8;
+                let c_bit: u8 = if offset == 0 || offset == 32 {
+                    ((rs_value >> 31) & 1) as u8
+                } else if offset > 32 {
+                    0
+                } else {
+                    ((rs_value >> (offset - 1)) & 1) as u8
+                };
 
                 self.set_cpsr_bit(N_FLAG, n_bit);
                 self.set_cpsr_bit(Z_FLAG, z_bit);
-                if offset != 0 {
-                    self.set_cpsr_bit(C_FLAG, c_bit);
-                }
+                self.set_cpsr_bit(C_FLAG, c_bit);
 
                 value
             }
@@ -1125,6 +1135,75 @@ impl CPU {
 
                             _ => {
                                 unreachable!()
+                            }
+                        }
+                    }
+
+                    "010001_oo_a_b_ccc_ddd" => {
+                        let opcode = o as u8;
+                        let msbd = a as usize;
+                        let msbs = b as usize;
+                        let rs = c as usize;
+                        let rd = d as usize;
+
+                        let rd = msbd << 3 | rd;
+                        let rd_value = self.get_register_value(rd);
+
+                        let rs = msbs << 3 | rs;
+                        let rs_value = self.get_register_value(rs);
+
+                        match opcode {
+                            // add
+                            0b00 => {
+                                let data = rd_value.wrapping_add(rs_value);
+                                self.set_register_value(rd, data);
+                            }
+
+                            // cmp
+                            0b01 => {
+                                let tuple = rd_value.overflowing_sub(rs_value);
+                                let data = tuple.0;
+
+                                let n_bit = ((data >> 31) & 1) as u8;
+                                let z_bit = (data == 0) as u8;
+                                let c_bit = !tuple.1 as u8;
+                                let v_bit =
+                                    i32::overflowing_sub(rd_value as i32, rs_value as i32).1 as u8;
+
+                                self.set_cpsr_bit(N_FLAG, n_bit);
+                                self.set_cpsr_bit(Z_FLAG, z_bit);
+                                self.set_cpsr_bit(C_FLAG, c_bit);
+                                self.set_cpsr_bit(V_FLAG, v_bit);
+                            }
+
+                            // mov
+                            0b10 => {
+                                if rd != rs {
+                                    let data = rs_value;
+                                    self.set_register_value(rd, data);
+                                }
+                            }
+
+                            // bx
+                            0b11 => {
+                                let jump_addr = if rs & 1 == 0 {
+                                    // switch to ARM state
+                                    self.set_cpsr_bit(T_FLAG, 0);
+
+                                    if rs == PC && rd_value & 3 != 0b000 {
+                                        self.registers.pc & !2
+                                    } else {
+                                        rs_value & !3
+                                    }
+                                } else {
+                                    rs_value
+                                };
+
+                                self.registers.pc = jump_addr;
+                            }
+
+                            _ => {
+                                unreachable!();
                             }
                         }
                     }
