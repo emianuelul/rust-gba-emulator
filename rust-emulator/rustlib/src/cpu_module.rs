@@ -1,7 +1,7 @@
 use crate::constants::*;
 use crate::memory_area::GBAMemory;
 use bitmatch::bitmatch;
-use std::collections::HashMap;
+use std::{collections::HashMap, intrinsics::unreachable};
 use tracing::{error, warn};
 
 // fetch
@@ -1448,6 +1448,34 @@ impl CPU {
                             b as usize,
                             d as usize,
                         );
+                    }
+
+                    // load/store sp relative
+                    "1001_o_ddd_nnnnnnnn" => {
+                        let opcode = o as u8;
+                        let rd = d as usize;
+                        let imm = ((n as u8) as u32) << 2;
+
+                        let addr = self.get_register_value(SP).wrapping_add(imm);
+                        match opcode {
+                            // str
+                            0 => {
+                                let data = self.get_register_value(rd);
+
+                                memory.write32(addr, data);
+                            }
+
+                            // ldr
+                            1 => {
+                                let data = memory.read32(addr).0.rotate_right(8 * (addr & 3));
+
+                                self.set_register_value(rd, data);
+                            }
+
+                            _ => {
+                                unreachable!();
+                            }
+                        }
                     }
 
                     _ => {
