@@ -870,6 +870,18 @@ impl CPU {
 
 // THUMB load/store logic
 impl CPU {
+    fn ls_execute_pcr(&mut self, memory: &mut GBAMemory, rd: usize, imm: u32) -> u32 {
+        let pc_value = self.registers.pc & !2;
+
+        let addr = pc_value.wrapping_add(imm);
+        let (data, clk) = memory.read32(addr);
+
+        self.set_register_value(rd, data);
+
+        // clk += 1S + 1N + 1I
+        clk
+    }
+
     fn ls_execute_ro(
         &mut self,
         memory: &mut GBAMemory,
@@ -877,48 +889,49 @@ impl CPU {
         offset: usize,
         rb: usize,
         rd: usize,
-    ) {
+    ) -> u32 {
         let offset = self.get_register_value(offset);
 
+        let addr = self.get_register_value(rb).wrapping_add(offset);
         match opcode {
             // str
             0b00 => {
-                let addr = self.get_register_value(rb).wrapping_add(offset);
                 let data = self.get_register_value(rd);
 
-                memory.write32(addr, data);
+                let clk: u32 = memory.write32(addr, data);
+
+                // clk += 2N
+                clk
             }
 
             // strb
             0b01 => {
-                let addr = self.get_register_value(rb).wrapping_add(offset);
                 let data = self.get_register_value(rd) as u8;
 
-                memory.write8(addr, data);
+                let clk: u32 = memory.write8(addr, data);
+
+                // clk += 2N
+                clk
             }
 
             // ldr
             0b10 => {
-                let data_addr = self.get_register_value(rb).wrapping_add(offset);
-                if data_addr & 3 != 0 {
-                    let aligned_addr = data_addr & !3;
-                    let data = memory.read32(aligned_addr).0;
-                    let data = data.rotate_right(8 * (data_addr & 3));
+                let (data, clk) = memory.read32(addr);
+                let data = data.rotate_right(8 * (addr & 3));
+                self.set_register_value(rd, data);
 
-                    self.set_register_value(rd, data);
-                } else {
-                    let data = memory.read32(data_addr).0;
-
-                    self.set_register_value(rd, data);
-                }
+                // clk += 1S + 1N + 1I
+                clk
             }
 
             // ldrb
             0b11 => {
-                let data_addr = self.get_register_value(rb).wrapping_add(offset);
-                let data = memory.read8(data_addr).0;
+                let (data, clk) = memory.read8(addr);
 
                 self.set_register_value(rd, data as u32);
+
+                // clk += 1S + 1N + 1I
+                clk
             }
 
             _ => {
@@ -934,7 +947,7 @@ impl CPU {
         ro: usize,
         rb: usize,
         rd: usize,
-    ) {
+    ) -> u32 {
         let ro_value = self.get_register_value(ro);
         let rb_value = self.get_register_value(rb);
 
@@ -944,45 +957,51 @@ impl CPU {
             0b00 => {
                 let data = self.get_register_value(rd) as u16;
 
-                memory.write16(addr, data);
+                let clk: u32 = memory.write16(addr, data);
                 // clk += 2N
+                clk
             }
 
             // LDSB
             0b01 => {
-                let read_data = memory.read8(addr).0;
+                let (read_data, clk) = memory.read8(addr);
                 let data = read_data as i8 as i32 as u32;
 
                 self.set_register_value(rd, data);
                 // clk += 1S + 1N + 1I
+                clk
             }
 
             // LDRH
             0b10 => {
+                let (data, clk) = memory.read16(addr);
                 let data = if addr % 2 == 1 {
-                    (memory.read16(addr).0 as u32).rotate_right(8)
+                    (data as u32).rotate_right(8)
                 } else {
-                    memory.read16(addr).0 as u32
+                    data as u32
                 };
 
                 self.set_register_value(rd, data);
                 // clk += 1S + 1N + 1I
+                clk
             }
 
             // LDSH
             0b11 => {
                 if addr % 2 == 1 {
-                    let read_data = memory.read8(addr).0;
+                    let (read_data, clk) = memory.read8(addr);
                     let data = read_data as i8 as i32 as u32;
 
                     self.set_register_value(rd, data);
                     // clk += 1S + 1N + 1I
+                    clk
                 } else {
-                    let read_data = memory.read16(addr).0;
+                    let (read_data, clk) = memory.read16(addr);
                     let data = read_data as i16 as i32 as u32;
 
                     self.set_register_value(rd, data);
                     // clk += 1S + 1N + 1I
+                    clk
                 }
             }
 
@@ -999,7 +1018,7 @@ impl CPU {
         imm: u32,
         rb: usize,
         rd: usize,
-    ) {
+    ) -> u32 {
         let rb_value = self.get_register_value(rb);
         let word_addr = rb_value.wrapping_add(imm << 2);
         let byte_addr = rb_value.wrapping_add(imm);
@@ -1009,34 +1028,41 @@ impl CPU {
             0b00 => {
                 let data = self.get_register_value(rd);
 
-                memory.write32(word_addr, data);
+                let clk: u32 = memory.write32(word_addr, data);
+
+                // clk += 2N
+                clk
             }
 
             // LDR
             0b01 => {
-                let data = if word_addr & 3 != 0 {
-                    let aligned_addr = word_addr & !3;
-                    let data = memory.read32(aligned_addr).0;
-                    data.rotate_right(8 * (word_addr & 3))
-                } else {
-                    memory.read32(word_addr).0
-                };
+                let (data, clk) = memory.read32(word_addr);
+                let data = data.rotate_right(8 * (word_addr & 3));
 
                 self.set_register_value(rd, data);
+
+                // clk += 1N+1S+1I
+                clk
             }
 
             // STRB
             0b10 => {
                 let data = self.get_register_value(rd);
 
-                memory.write8(byte_addr, data as u8);
+                let clk: u32 = memory.write8(byte_addr, data as u8);
+
+                // clk += 2N
+                clk
             }
 
             // LDRB
             0b11 => {
-                let data = memory.read8(byte_addr).0 as u32;
+                let (data, clk) = memory.read8(byte_addr);
 
-                self.set_register_value(rd, data);
+                self.set_register_value(rd, data as u32);
+
+                // clk += 1N+1S+1I
+                clk
             }
 
             _ => {
@@ -1045,25 +1071,69 @@ impl CPU {
         }
     }
 
-    fn ls_execute_h(&mut self, memory: &mut GBAMemory, opcode: u8, imm: u32, rb: usize, rd: usize) {
+    fn ls_execute_h(
+        &mut self,
+        memory: &mut GBAMemory,
+        opcode: u8,
+        imm: u32,
+        rb: usize,
+        rd: usize,
+    ) -> u32 {
         let addr = self.get_register_value(rb).wrapping_add(imm);
         match opcode {
             // strh
             0 => {
                 let data = self.get_register_value(rd) as u16;
 
-                memory.write16(addr, data);
+                let clk: u32 = memory.write16(addr, data);
+
+                // clk += 2N
+                clk
             }
 
             // ldrh
             1 => {
+                let (data, clk) = memory.read16(addr);
                 let data = if !addr.is_multiple_of(2) {
-                    (memory.read16(addr).0 as u32).rotate_right(8)
+                    (data as u32).rotate_right(8)
                 } else {
-                    memory.read16(addr).0 as u32
+                    data as u32
                 };
 
                 self.set_register_value(rd, data);
+
+                // clk += 1S+1N+1I
+                clk
+            }
+
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+
+    fn ls_execute_spr(&mut self, memory: &mut GBAMemory, opcode: u8, rd: usize, imm: u32) -> u32 {
+        let addr = self.get_register_value(SP).wrapping_add(imm);
+        match opcode {
+            // str
+            0 => {
+                let data = self.get_register_value(rd);
+
+                let clk: u32 = memory.write32(addr, data);
+
+                // clk += 2N
+                clk
+            }
+
+            // ldr
+            1 => {
+                let (data, clk) = memory.read32(addr);
+                let data = data.rotate_right(8 * (addr & 3));
+
+                self.set_register_value(rd, data);
+
+                // clk += 1S + 1N + 1I
+                clk
             }
 
             _ => {
@@ -1408,14 +1478,7 @@ impl CPU {
 
                     // ldr (load imm from literal pool)
                     "01001_ddd_nnnnnnnn" => {
-                        let rd = d as usize;
-                        let imm = (n as u32) << 2;
-                        let pc_value = self.registers.pc & !2;
-
-                        let data_addr = pc_value.wrapping_add(imm);
-                        let data = memory.read32(data_addr).0;
-
-                        self.set_register_value(rd, data);
+                        self.ls_execute_pcr(memory, d as usize, (n as u32) << 2);
                     }
 
                     // load/store with register offset
@@ -1452,32 +1515,10 @@ impl CPU {
 
                     // load/store sp relative
                     "1001_o_ddd_nnnnnnnn" => {
-                        let opcode = o as u8;
-                        let rd = d as usize;
-                        let imm = ((n as u8) as u32) << 2;
-
-                        let addr = self.get_register_value(SP).wrapping_add(imm);
-                        match opcode {
-                            // str
-                            0 => {
-                                let data = self.get_register_value(rd);
-
-                                memory.write32(addr, data);
-                            }
-
-                            // ldr
-                            1 => {
-                                let data = memory.read32(addr).0.rotate_right(8 * (addr & 3));
-
-                                self.set_register_value(rd, data);
-                            }
-
-                            _ => {
-                                unreachable!();
-                            }
-                        }
+                        self.ls_execute_spr(memory, o as u8, d as usize, ((n as u8) as u32) << 2);
                     }
 
+                    //
                     _ => {
                         error!("invalid thumb instructio detected: {:b}", instruction)
                     }
