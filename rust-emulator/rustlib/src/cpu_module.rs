@@ -1198,6 +1198,135 @@ impl CPU {
     }
 }
 
+// THUMB Multiple Load Store
+impl CPU {
+    fn mls_exec_pp(
+        &mut self,
+        memory: &mut GBAMemory,
+        opcode: u8,
+        pc_lr: u8,
+        rlist: &mut Vec<usize>,
+    ) {
+        match opcode {
+            // push
+            0 => {
+                if pc_lr == 1 {
+                    rlist.push(LR);
+                }
+                for &reg in rlist.iter().rev() {
+                    let data = self.get_register_value(reg);
+                    let addr = self.get_register_value(SP).wrapping_sub(4);
+                    memory.write32(addr, data);
+
+                    self.set_register_value(SP, addr);
+                }
+
+                // clk += (n-1)S + 2N
+            }
+            // pop
+            1 => {
+                if pc_lr == 1 {
+                    rlist.push(PC);
+                }
+
+                for &reg in rlist.iter() {
+                    let addr = self.get_register_value(SP);
+                    let data = if reg == PC {
+                        memory.read32(addr).0 & !1
+                    } else {
+                        memory.read32(addr).0
+                    };
+
+                    self.set_register_value(reg, data);
+
+                    self.set_register_value(SP, addr.wrapping_add(4));
+                }
+
+                // clk += nS +1N + 1I (+1S +1N if PC is loaded)
+            }
+
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+
+    fn mls_exec_mls(
+        &mut self,
+        memory: &mut GBAMemory,
+        opcode: u8,
+        rb: usize,
+        rlist: &mut Vec<usize>,
+    ) {
+        let empty = rlist.is_empty();
+        if empty {
+            rlist.push(PC);
+        }
+
+        match opcode {
+            // stmia
+            0 => {
+                let init_addr = self.get_register_value(rb);
+                let mut addr = init_addr;
+                let end_base_value = if empty {
+                    init_addr.wrapping_add(0x40)
+                } else {
+                    init_addr.wrapping_add(4 * rlist.len() as u32)
+                };
+
+                for (i, &reg) in rlist.iter().enumerate() {
+                    let data = if reg == PC {
+                        self.registers.pc.wrapping_add(2)
+                    } else if reg == rb {
+                        if i == 0 {
+                            init_addr
+                        } else {
+                            end_base_value
+                        }
+                    } else {
+                        self.get_register_value(reg)
+                    };
+
+                    memory.write32(addr, data);
+                    addr = addr.wrapping_add(4);
+                }
+
+                self.set_register_value(rb, end_base_value);
+            }
+
+            // ldmia
+            1 => {
+                let init_addr = self.get_register_value(rb);
+                let mut addr = init_addr;
+
+                let end_base_value = if empty {
+                    init_addr.wrapping_add(0x40)
+                } else {
+                    init_addr.wrapping_add(4 * rlist.len() as u32)
+                };
+
+                for &reg in rlist.iter() {
+                    let data = if reg == PC {
+                        memory.read32(addr).0 & !1
+                    } else {
+                        memory.read32(addr).0
+                    };
+                    self.set_register_value(reg, data);
+                    addr = addr.wrapping_add(4);
+                }
+
+                if !rlist.contains(&rb) {
+                    self.set_register_value(rb, end_base_value);
+                }
+            }
+
+            _ => {
+                unreachable!();
+            }
+        }
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
@@ -1217,7 +1346,7 @@ impl CPU {
                     self.registers.pc, instruction
                 );
 
-                self.registers.pc += 4;
+                self.registers.pc = self.registers.pc.wrapping_add(4);
 
                 #[bitmatch]
                 let "cccc_????????????????????????????" = instruction;
@@ -1487,7 +1616,7 @@ impl CPU {
                     self.registers.pc, instruction
                 );
 
-                self.registers.pc += 2;
+                self.registers.pc = self.registers.pc.wrapping_add(2);
 
                 #[bitmatch]
                 match instruction {
@@ -1583,7 +1712,34 @@ impl CPU {
                         self.ma_execute_spo(o as u8, (n as u32) << 2);
                     }
 
-                    //
+                    // push pop registers
+                    "1011_o_10_b_rrrrrrrr" => {
+                        let rlist_bitmask = r as u8;
+                        let mut rlist: Vec<usize> = Vec::new();
+                        for i in 0..8 {
+                            let bit = (rlist_bitmask >> i) & 1;
+                            if bit == 1 {
+                                rlist.push(i as usize);
+                            }
+                        }
+
+                        self.mls_exec_pp(memory, o as u8, b as u8, &mut rlist);
+                    }
+
+                    // Multiple Load Store
+                    "1100_o_bbb_rrrrrrrr" => {
+                        let rlist_bitmask = r as u8;
+                        let mut rlist: Vec<usize> = Vec::new();
+                        for i in 0..8 {
+                            let bit = (rlist_bitmask >> i) & 1;
+                            if bit == 1 {
+                                rlist.push(i as usize);
+                            }
+                        }
+
+                        self.mls_exec_mls(memory, o as u8, b as usize, &mut rlist);
+                    }
+
                     _ => {
                         error!("invalid thumb instructio detected: {:b}", instruction)
                     }
