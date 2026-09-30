@@ -1,7 +1,7 @@
 use crate::constants::*;
 use crate::memory_area::GBAMemory;
 use bitmatch::bitmatch;
-use std::{collections::HashMap, intrinsics::unreachable};
+use std::collections::HashMap;
 use tracing::{error, warn};
 
 // fetch
@@ -1151,6 +1151,53 @@ impl CPU {
     }
 }
 
+// THUMB Memory Addressing
+impl CPU {
+    fn ma_execute_ra(&mut self, opcode: u8, rd: usize, imm: u32) {
+        match opcode {
+            // add rd, pc, imm
+            0 => {
+                let data = ((self.registers.pc + 2) & !2).wrapping_add(imm);
+
+                self.set_register_value(rd, data);
+            }
+
+            // add rd, sp, imm
+            1 => {
+                let data = self.get_register_value(SP).wrapping_add(imm);
+
+                self.set_register_value(rd, data);
+            }
+
+            _ => {
+                unreachable!();
+            }
+        }
+
+        // clk += 1S
+    }
+
+    fn ma_execute_spo(&mut self, opcode: u8, imm: u32) {
+        let sp_value = self.get_register_value(SP);
+
+        let data = match opcode {
+            // add sp, imm
+            0 => sp_value.wrapping_add(imm),
+
+            // sub sp, imm
+            1 => sp_value.wrapping_sub(imm),
+
+            _ => {
+                unreachable!();
+            }
+        };
+
+        self.set_register_value(SP, data);
+
+        // clk += 1S
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
@@ -1524,6 +1571,16 @@ impl CPU {
                     // load/store sp relative
                     "1001_o_ddd_nnnnnnnn" => {
                         self.ls_execute_spr(memory, o as u8, d as usize, ((n as u8) as u32) << 2);
+                    }
+
+                    // get relative addr
+                    "1010_o_ddd_nnnnnnnn" => {
+                        self.ma_execute_ra(o as u8, d as usize, (n as u32) << 2);
+                    }
+
+                    // add offset to sp
+                    "10110000_o_nnnnnnn" => {
+                        self.ma_execute_spo(o as u8, (n as u32) << 2);
                     }
 
                     //
