@@ -798,10 +798,18 @@ impl CPU {
 
     fn ro_execute_hi_reg(&mut self, opcode: u8, msbd: usize, msbs: usize, rs: usize, rd: usize) {
         let rd = msbd << 3 | rd;
-        let rd_value = self.get_register_value(rd);
+        let rd_value = if rd == PC {
+            self.registers.pc.wrapping_add(2)
+        } else {
+            self.get_register_value(rd)
+        };
 
         let rs = msbs << 3 | rs;
-        let rs_value = self.get_register_value(rs);
+        let rs_value = if rs == PC {
+            self.registers.pc.wrapping_add(2)
+        } else {
+            self.get_register_value(rs)
+        };
 
         match opcode {
             // add
@@ -871,7 +879,7 @@ impl CPU {
 // THUMB load/store logic
 impl CPU {
     fn ls_execute_pcr(&mut self, memory: &mut GBAMemory, rd: usize, imm: u32) -> u32 {
-        let pc_value = self.registers.pc & !2;
+        let pc_value = (self.registers.pc.wrapping_add(2)) & !2;
 
         let addr = pc_value.wrapping_add(imm);
         let (data, clk) = memory.read32(addr);
