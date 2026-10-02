@@ -1327,6 +1327,19 @@ impl CPU {
     }
 }
 
+// THUMB Jumps and Calls
+impl CPU {
+    fn jc_execute_cb(&mut self, cond: bool, offset: u32) {
+        if !cond {
+            return;
+            // clk += 1S
+        }
+        let dest = self.registers.pc.wrapping_sub(2).wrapping_add(offset) & !1;
+        self.registers.pc = dest;
+        // clk += 2S + 1N
+    }
+}
+
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
@@ -1740,6 +1753,31 @@ impl CPU {
                         self.mls_exec_mls(memory, o as u8, b as usize, &mut rlist);
                     }
 
+                    // conditional branch
+                    "1101_cccc_oooooooo" => {
+                        let cond = self.check_condition(c as u8);
+                        let offset = (o as u32) << 1;
+
+                        self.jc_execute_cb(cond, offset);
+                    }
+
+                    // THUMB SWI
+                    "11011111_nnnnnnnn" => {
+                        // TODO: IMPL AFTER BIOS FUNCTIONS
+                        // clk += 2S + 1N
+                    }
+
+                    // unconditional branch
+                    "11100_nnnnnnnnnnn" => {
+                        let offset = (((n << 5) as i16 as i32) << 1) as u32;
+                        let dest = self.registers.pc.wrapping_sub(2).wrapping_add(offset) & !1;
+
+                        self.registers.pc = dest;
+
+                        // clk += 2S + 1N
+                    }
+
+                    //
                     _ => {
                         error!("invalid thumb instructio detected: {:b}", instruction)
                     }
