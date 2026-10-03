@@ -3,6 +3,7 @@ use crate::{cpu_module::CPU, memory_area::GBAMemory};
 pub mod constants;
 pub mod cpu_arm_ops;
 pub mod cpu_module;
+pub mod cpu_thumb_ops;
 pub mod gba_emulator;
 pub mod memory_area;
 

@@ -28,7 +28,7 @@ impl CPU {
 
     pub fn b_execute_bx(&mut self, n: u8) {
         if n == 15 {
-            self.registers.pc += 4;
+            self.registers.pc = self.registers.pc.wrapping_add(4);
             // 2S + 1N
         }
 
@@ -68,13 +68,16 @@ impl CPU {
         self.set_cpsr_bit(N_FLAG, n_bit);
     }
 
-    fn alu_rrx(&mut self, to_shift: u32, s: u8) -> u32 {
+    fn alu_rrx(&self, to_shift: u32, s: u8) -> (u32, Option<u8>) {
         let old_c = self.get_cpsr_bit(C_FLAG);
-        if s == 1 {
-            self.set_cpsr_bit(C_FLAG, (to_shift & 1) as u8);
-        }
+        let result = (to_shift >> 1) | ((old_c as u32) << 31);
+        let carry = if s == 1 {
+            Some((to_shift & 1) as u8)
+        } else {
+            None
+        };
 
-        (to_shift >> 1) | ((old_c as u32) << 31)
+        (result, carry)
     }
 
     pub fn alu_execute_op(
@@ -84,9 +87,11 @@ impl CPU {
         rd: u8,
         op2: u32,
         s: u8,
-        carry: u32,
+        carry: (u8, Option<u8>),
     ) {
         let mode: CPUMode = self.get_cpu_mode();
+        let carry_in = carry.0;
+        let shift_carry = carry.1;
 
         let s: u8 = if s == 1 && rd == 15 {
             if mode != CPUMode::Sys && mode != CPUMode::User {
@@ -113,6 +118,9 @@ impl CPU {
 
                 if s == 1 {
                     self.alu_set_n_z_flags(data);
+                    if let Some(c) = shift_carry {
+                        self.set_cpsr_bit(C_FLAG, c);
+                    }
                 }
 
                 self.set_register_value(rd as usize, data);
@@ -124,6 +132,9 @@ impl CPU {
 
                 if s == 1 {
                     self.alu_set_n_z_flags(data);
+                    if let Some(c) = shift_carry {
+                        self.set_cpsr_bit(C_FLAG, c);
+                    }
                 }
 
                 self.set_register_value(rd as usize, data);
@@ -181,7 +192,7 @@ impl CPU {
 
             // ADC
             0x5 => {
-                let full = rn_value as u64 + op2 as u64 + carry as u64;
+                let full = rn_value as u64 + op2 as u64 + carry_in as u64;
                 let data = full as u32;
 
                 if s == 1 {
@@ -203,7 +214,7 @@ impl CPU {
 
             // SBC
             0x6 => {
-                let borrow = 1 - carry;
+                let borrow = 1 - carry_in as u32;
                 let data = rn_value.wrapping_sub(op2).wrapping_sub(borrow);
 
                 if s == 1 {
@@ -225,7 +236,7 @@ impl CPU {
 
             // RSC
             0x7 => {
-                let borrow = 1 - carry;
+                let borrow = 1 - carry_in as u32;
                 let data = op2.wrapping_sub(rn_value).wrapping_sub(borrow);
 
                 if s == 1 {
@@ -251,6 +262,9 @@ impl CPU {
 
                 if s == 1 && rd != 15 {
                     self.alu_set_n_z_flags(data);
+                    if let Some(c) = shift_carry {
+                        self.set_cpsr_bit(C_FLAG, c);
+                    }
                 } else if s == 1 && rd == 15 {
                     warn!("TSTP in User/Sys mode (not allowed)");
                 }
@@ -262,6 +276,9 @@ impl CPU {
 
                 if s == 1 && rd != 15 {
                     self.alu_set_n_z_flags(data);
+                    if let Some(c) = shift_carry {
+                        self.set_cpsr_bit(C_FLAG, c);
+                    }
                 } else if s == 1 && rd == 15 {
                     warn!("TEQP in User/Sys mode (not allowed)")
                 }
@@ -305,6 +322,9 @@ impl CPU {
 
                 if s == 1 {
                     self.alu_set_n_z_flags(data);
+                    if let Some(c) = shift_carry {
+                        self.set_cpsr_bit(C_FLAG, c);
+                    }
                 }
 
                 self.set_register_value(rd as usize, data);
@@ -314,6 +334,9 @@ impl CPU {
             0xD => {
                 if s == 1 {
                     self.alu_set_n_z_flags(op2);
+                    if let Some(c) = shift_carry {
+                        self.set_cpsr_bit(C_FLAG, c);
+                    }
                 }
 
                 self.set_register_value(rd as usize, op2);
@@ -325,6 +348,9 @@ impl CPU {
 
                 if s == 1 {
                     self.alu_set_n_z_flags(data);
+                    if let Some(c) = shift_carry {
+                        self.set_cpsr_bit(C_FLAG, c);
+                    }
                 }
 
                 self.set_register_value(rd as usize, data);
@@ -334,6 +360,9 @@ impl CPU {
             0xF => {
                 if s == 1 {
                     self.alu_set_n_z_flags(!op2);
+                    if let Some(c) = shift_carry {
+                        self.set_cpsr_bit(C_FLAG, c);
+                    }
                 }
 
                 self.set_register_value(rd as usize, !op2);
@@ -345,30 +374,30 @@ impl CPU {
     }
 
     pub fn alu_apply_shift(
-        &mut self,
+        &self,
         shift_type: u8,
         to_shift: u32,
         amount: u8,
         imm: bool,
         s: u8,
-    ) -> u32 {
-        match shift_type {
+    ) -> (u32, Option<u8>) {
+        let mut c_bit: Option<u8> = None;
+        let shifted = match shift_type {
             0 => {
                 if amount == 0 {
                     to_shift
                 } else if amount >= 32 {
                     if s == 1 {
                         if amount > 32 {
-                            self.set_cpsr_bit(C_FLAG, 0);
+                            c_bit = Some(0);
                         } else {
-                            self.set_cpsr_bit(C_FLAG, (to_shift & 1) as u8);
+                            c_bit = Some((to_shift & 1) as u8);
                         }
                     }
                     0
                 } else {
                     if s == 1 {
-                        let carry_bit = ((to_shift >> (32 - amount)) & 1) as u8;
-                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                        c_bit = Some(((to_shift >> (32 - amount)) & 1) as u8);
                     }
                     to_shift << amount
                 }
@@ -384,19 +413,19 @@ impl CPU {
                     0 => to_shift,
                     1..=31 => {
                         if s == 1 {
-                            self.set_cpsr_bit(C_FLAG, ((to_shift >> (n - 1)) & 1) as u8);
+                            c_bit = Some(((to_shift >> (n - 1)) & 1) as u8);
                         }
                         to_shift >> n
                     }
                     32 => {
                         if s == 1 {
-                            self.set_cpsr_bit(C_FLAG, (to_shift >> 31) as u8);
+                            c_bit = Some((to_shift >> 31) as u8);
                         }
                         0
                     }
                     _ => {
                         if s == 1 {
-                            self.set_cpsr_bit(C_FLAG, 0);
+                            c_bit = Some(0);
                         }
                         0
                     }
@@ -406,8 +435,7 @@ impl CPU {
             2 => {
                 if amount >= 32 || (amount == 0 && imm) {
                     if s == 1 {
-                        let carry_bit = ((to_shift >> 31) & 1) as u8;
-                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                        c_bit = Some(((to_shift >> 31) & 1) as u8);
                     }
                     let first_bit = (to_shift >> 31) & 1;
                     if first_bit == 1 {
@@ -419,8 +447,7 @@ impl CPU {
                     to_shift
                 } else {
                     if s == 1 {
-                        let carry_bit = ((to_shift >> (amount - 1)) & 1) as u8;
-                        self.set_cpsr_bit(C_FLAG, carry_bit);
+                        c_bit = Some(((to_shift >> (amount - 1)) & 1) as u8);
                     }
                     (to_shift as i32 >> amount) as u32
                 }
@@ -428,19 +455,23 @@ impl CPU {
 
             3 => {
                 if amount == 0 && imm {
-                    self.alu_rrx(to_shift, s)
+                    let (result, carry) = self.alu_rrx(to_shift, s);
+                    c_bit = carry;
+                    result
                 } else if amount == 0 {
                     to_shift
                 } else {
                     let res = to_shift.rotate_right((amount & 31) as u32);
                     if s == 1 {
-                        self.set_cpsr_bit(C_FLAG, (res >> 31) as u8);
+                        c_bit = Some((res >> 31) as u8);
                     }
                     res
                 }
             }
             _ => unreachable!(),
-        }
+        };
+
+        (shifted, c_bit)
     }
 }
 
@@ -503,15 +534,9 @@ impl CPU {
 
             // UMULL
             0b0100 => {
-                if rd == PC as u8
-                    || rn == PC as u8
-                    || rm == PC as u8
-                    || rd == rn
-                    || rd == rm
-                    || rs == rm
-                {
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rd == rn || rd == rm {
                     error!(
-                        "UMULL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
+                        "UMULL called with invalid args (Rd Rn and Rm may not be the same || may be PC)"
                     );
                     return 0;
                 }
@@ -537,15 +562,9 @@ impl CPU {
 
             // UMLAL
             0b0101 => {
-                if rd == PC as u8
-                    || rn == PC as u8
-                    || rm == PC as u8
-                    || rd == rn
-                    || rd == rm
-                    || rs == rm
-                {
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rd == rn || rd == rm {
                     error!(
-                        "UMLAL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
+                        "UMLAL called with invalid args (Rd Rn and Rm may not be the same || may be PC)"
                     );
                     return 0;
                 }
@@ -576,15 +595,9 @@ impl CPU {
 
             // SMULL
             0b0110 => {
-                if rd == PC as u8
-                    || rn == PC as u8
-                    || rm == PC as u8
-                    || rd == rn
-                    || rd == rm
-                    || rs == rm
-                {
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rd == rn || rd == rm {
                     error!(
-                        "SMULL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
+                        "SMULL called with invalid args (Rd Rn and Rm may not be the same || may be PC)"
                     );
                     return 0;
                 }
@@ -610,15 +623,9 @@ impl CPU {
 
             // SMLAL
             0b0111 => {
-                if rd == PC as u8
-                    || rn == PC as u8
-                    || rm == PC as u8
-                    || rd == rn
-                    || rd == rm
-                    || rs == rm
-                {
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rd == rn || rd == rm {
                     error!(
-                        "SMLAL called with invalid args (Rd Rn and Rm may be the same || may be PC)"
+                        "SMLAL called with invalid args (Rd Rn and Rm may not be the same || may be PC)"
                     );
 
                     return 0;
@@ -673,14 +680,14 @@ impl CPU {
 
         let byte_mask: u8 = 0b00100000;
 
-        let first_byte = if flags == 1 {
+        let first_byte = if flags == 0 {
             psr_bytes[0] as u32
         } else {
             op_bytes[0] as u32
         };
         let second_byte = psr_bytes[1] as u32;
         let third_byte = psr_bytes[2] as u32;
-        let fourth_byte = if control == 1 && curr_mode != CPUMode::User {
+        let fourth_byte = if control == 0 || curr_mode == CPUMode::User {
             psr_bytes[3] as u32
         } else {
             ((op_bytes[3] & !byte_mask) | (psr_bytes[3] & byte_mask)) as u32
@@ -756,12 +763,15 @@ impl CPU {
             }
 
             1 => {
-                if amount >= 32 {
-                    0
-                } else if amount == 0 {
-                    to_shift
+                let n = if amount == 0 {
+                    32
                 } else {
-                    to_shift >> amount
+                    amount
+                };
+                match n {
+                    0 => to_shift,
+                    1..=31 => to_shift >> amount,
+                    32.. => 0,
                 }
             }
 
@@ -1133,7 +1143,12 @@ impl CPU {
             rlist.push(PC);
         }
 
-        let block_size = 4 * rlist.len();
+        let block_size = if was_empty {
+            0x40
+        } else {
+            4 * rlist.len()
+        };
+
         let start_addr = self.bdt_get_start_addr(block_size, flags[0], flags[1], rn_value);
         let writeback_addr = if was_empty {
             if flags[1] == 1 {
@@ -1152,24 +1167,23 @@ impl CPU {
         match opcode {
             // STM - [rn+offset] = rlist[current_index]
             0 => {
-                let lowest = rlist.iter().min().copied();
-                let rn_is_lowest = lowest == Some(rn);
-
-                for (index, &val) in rlist.iter().enumerate() {
-                    let addr: u32 = start_addr + 4 * index as u32;
-
-                    let data: u32 = if s_bit {
-                        self.get_user_register_value(val)
-                    } else if val == rn && rn_is_lowest {
+                let mut addr = start_addr;
+                for (index, &reg) in rlist.iter().enumerate() {
+                    let data = if reg == PC {
+                        self.registers.pc.wrapping_add(8)
+                    } else if s_bit {
+                        self.get_user_register_value(reg)
+                    } else if reg == rn && index != 0 && flags[3] == 1 {
                         writeback_addr
                     } else {
-                        self.get_register_value(val)
+                        self.get_register_value(reg)
                     };
 
                     clk += memory.write32(addr, data);
+                    addr = addr.wrapping_add(4);
                 }
 
-                if flags[3] == 1 && !s_bit {
+                if flags[3] == 1 {
                     self.set_register_value(rn, writeback_addr);
                 }
 
@@ -1179,32 +1193,35 @@ impl CPU {
             // LDM
             1 => {
                 let change_psr = rlist.contains(&PC) && s_bit;
+                let load_user_reg = !change_psr && s_bit;
 
-                for (index, &value) in rlist.iter().enumerate() {
-                    let addr: u32 = start_addr + 4 * index as u32;
-
-                    if s_bit && value == PC {
-                        // clk += 1S + 1N
-                        self.cpsr = *self.spsr.get(&self.get_effective_cpu_mode()).unwrap();
-                    }
-
-                    let (data, mem_clk) = memory.read32(addr);
+                let mut addr = start_addr;
+                for &reg in rlist.iter() {
+                    let (mut data, mem_clk) = memory.read32(addr);
                     clk += mem_clk;
 
-                    let data = if value == PC {
-                        data & !3
-                    } else {
-                        data
-                    };
-
-                    if s_bit && !change_psr {
-                        self.set_user_register_value(value, data);
-                    } else {
-                        self.set_register_value(value, data);
+                    if reg == PC {
+                        data &= !3;
                     }
+
+                    if load_user_reg {
+                        self.set_user_register_value(reg, data);
+                    } else {
+                        self.set_register_value(reg, data);
+                    }
+
+                    addr = addr.wrapping_add(4);
                 }
 
-                if (change_psr || !s_bit) && !rlist.contains(&rn) && flags[3] == 1 {
+                if change_psr {
+                    let saved_psr = self
+                        .spsr
+                        .get(&self.get_effective_cpu_mode())
+                        .expect("LDM with S = 1 needs to be called from mode with SPSR");
+                    self.cpsr = *saved_psr;
+                }
+
+                if flags[3] == 1 && !rlist.contains(&rn) {
                     self.set_register_value(rn, writeback_addr);
                 }
 
