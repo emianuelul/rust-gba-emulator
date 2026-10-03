@@ -675,25 +675,25 @@ impl CPU {
         control: u8,
     ) -> u32 {
         let mut new_psr = psr;
-        let priviledged = self.get_cpu_mode() != CPUMode::User;
+        let privileged = self.get_cpu_mode() != CPUMode::User;
 
         if flags == 1 {
-            if priviledged {
+            if privileged {
                 new_psr = (new_psr & !0xF000_0000) | (op & !0xF000_0000);
             } else {
                 new_psr = (new_psr & !0xFF00_0000) | (op & !0xFF00_0000);
             }
         }
 
-        if status == 1 && priviledged {
+        if status == 1 && privileged {
             new_psr = (new_psr & !0x00FF_0000) | (op & !0x00FF_0000);
         }
 
-        if extension == 1 && priviledged {
+        if extension == 1 && privileged {
             new_psr = (new_psr & !0x0000_FF00) | (op & !0x0000_FF00);
         }
 
-        if control == 1 && priviledged {
+        if control == 1 && privileged {
             new_psr = (new_psr & !0x0000_00DF) | (op & !0x0000_00DF);
         }
 
