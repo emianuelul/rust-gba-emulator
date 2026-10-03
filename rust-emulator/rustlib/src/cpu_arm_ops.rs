@@ -670,30 +670,34 @@ impl CPU {
         psr: u32,
         op: u32,
         flags: u8,
-        _status: u8,
-        _extension: u8,
+        status: u8,
+        extension: u8,
         control: u8,
     ) -> u32 {
-        let op_bytes = op.to_be_bytes();
-        let psr_bytes = psr.to_be_bytes();
-        let curr_mode = self.get_cpu_mode();
+        let mut new_psr = psr;
+        let priviledged = self.get_cpu_mode() != CPUMode::User;
 
-        let byte_mask: u8 = 0b00100000;
+        if flags == 1 {
+            if priviledged {
+                new_psr = (new_psr & !0xF000_0000) | (op & !0xF000_0000);
+            } else {
+                new_psr = (new_psr & !0xFF00_0000) | (op & !0xFF00_0000);
+            }
+        }
 
-        let first_byte = if flags == 0 {
-            psr_bytes[0] as u32
-        } else {
-            op_bytes[0] as u32
-        };
-        let second_byte = psr_bytes[1] as u32;
-        let third_byte = psr_bytes[2] as u32;
-        let fourth_byte = if control == 0 || curr_mode == CPUMode::User {
-            psr_bytes[3] as u32
-        } else {
-            ((op_bytes[3] & !byte_mask) | (psr_bytes[3] & byte_mask)) as u32
-        };
+        if status == 1 && priviledged {
+            new_psr = (new_psr & !0x00FF_0000) | (op & !0x00FF_0000);
+        }
 
-        first_byte << 24 | second_byte << 16 | third_byte << 8 | fourth_byte
+        if extension == 1 && priviledged {
+            new_psr = (new_psr & !0x0000_FF00) | (op & !0x0000_FF00);
+        }
+
+        if control == 1 && priviledged {
+            new_psr = (new_psr & !0x0000_00DF) | (op & !0x0000_00DF);
+        }
+
+        new_psr
     }
 
     pub fn psrt_execute_msr_op(&mut self, p: u8, op: u32, write_arr: [u8; 4]) {
@@ -869,6 +873,11 @@ impl CPU {
             read_addr = rn_value;
 
             let (data, io_clk) = self.sdt_read_data(memory, read_addr, flags[2]);
+            let data = if rd == PC {
+                data & !3
+            } else {
+                data
+            };
 
             self.set_register_value(rd, data);
 
@@ -880,6 +889,11 @@ impl CPU {
             read_addr = (rn_value as i32 + operand as i32) as u32;
 
             let (data, io_clk) = self.sdt_read_data(memory, read_addr, flags[2]);
+            let data = if rd == PC {
+                data & !3
+            } else {
+                data
+            };
 
             self.set_register_value(rd, data);
 
@@ -1192,7 +1206,7 @@ impl CPU {
 
             // LDM
             1 => {
-                let change_psr = rlist.contains(&PC) && s_bit;
+                let change_psr = !was_empty && rlist.contains(&PC) && s_bit;
                 let load_user_reg = !change_psr && s_bit;
 
                 let mut addr = start_addr;
