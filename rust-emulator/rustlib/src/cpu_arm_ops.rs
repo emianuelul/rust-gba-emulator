@@ -533,7 +533,7 @@ impl CPU {
 
             // UMULL
             0b0100 => {
-                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 {
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rs == PC as u8 {
                     error!("UMULL called with invalid args (arg may not be PC)");
                     return 0;
                 }
@@ -559,7 +559,7 @@ impl CPU {
 
             // UMLAL
             0b0101 => {
-                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 {
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rs == PC as u8 {
                     error!("UMLAL called with invalid args (arg may not be PC)");
                     return 0;
                 }
@@ -590,7 +590,7 @@ impl CPU {
 
             // SMULL
             0b0110 => {
-                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 {
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rs == PC as u8 {
                     error!("SMULL called with invalid args (arg may not be PC)");
                     return 0;
                 }
@@ -616,7 +616,7 @@ impl CPU {
 
             // SMLAL
             0b0111 => {
-                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 {
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rs == PC as u8 {
                     error!("SMLAL called with invalid args (arg may not be PC)");
 
                     return 0;
