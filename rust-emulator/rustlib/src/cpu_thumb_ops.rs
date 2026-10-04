@@ -1,10 +1,182 @@
 use crate::constants::*;
 use crate::cpu_module::*;
 use crate::memory_area::*;
+use bitmatch::bitmatch;
+use tracing::error;
+
+// THUMB Decode, Execute
+impl CPU {
+    #[bitmatch]
+    pub fn thumb_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) {
+        #[bitmatch]
+        match instruction {
+            // ADD, SUB
+            "00011_oo_nnn_sss_ddd" => {
+                let opcode = o as u8;
+                let operand = n as u8;
+                let rs = s as usize;
+                let rd = d as usize;
+
+                self.ro_execute_add_sub(opcode, rd, rs, operand);
+            }
+
+            // move shifted register
+            "000_oo_nnnnn_sss_ddd" => {
+                let opcode = o as u8;
+                let offset = n as u8;
+                let rs = s as usize;
+                let rd = d as usize;
+
+                self.ro_execute_move_shifted(opcode, rd, rs, offset);
+            }
+
+            // mov, cmp, add, sub
+            "001_oo_ddd_nnnnnnnn" => {
+                let opcode = o as u8;
+                let rd = d as usize;
+                let imm = n as u8;
+                self.ro_execute_mcas_op(opcode, rd, imm);
+            }
+
+            // alu
+            "010000_oooo_sss_ddd" => {
+                self.ro_execute_alu_op(o as u8, s as usize, d as usize);
+            }
+
+            // hi register ops
+            "010001_oo_a_b_ccc_ddd" => {
+                self.ro_execute_hi_reg(o as u8, a as usize, b as usize, c as usize, d as usize);
+            }
+
+            // ldr (load imm from literal pool)
+            "01001_ddd_nnnnnnnn" => {
+                self.ls_execute_pcr(memory, d as usize, n << 2);
+            }
+
+            // load/store with register offset
+            "0101_oo_0_fff_bbb_ddd" => {
+                self.ls_execute_ro(memory, o as u8, f as usize, b as usize, d as usize);
+            }
+
+            // load/store sign extended byte/halfword
+            "0101_oo_1_fff_bbb_ddd" => {
+                self.ls_execute_sh(memory, o as u8, f as usize, b as usize, d as usize);
+            }
+
+            // load/store with imm offset
+            "011_oo_nnnnn_bbb_ddd" => {
+                self.ls_execute_io(memory, o as u8, n & 0b00011111, b as usize, d as usize);
+            }
+
+            // load/store halfword
+            "1000_o_nnnnn_bbb_ddd" => {
+                self.ls_execute_h(
+                    memory,
+                    o as u8,
+                    (n & 0b00011111) << 1,
+                    b as usize,
+                    d as usize,
+                );
+            }
+
+            // load/store sp relative
+            "1001_o_ddd_nnnnnnnn" => {
+                self.ls_execute_spr(memory, o as u8, d as usize, ((n as u8) as u32) << 2);
+            }
+
+            // get relative addr
+            "1010_o_ddd_nnnnnnnn" => {
+                self.ma_execute_ra(o as u8, d as usize, n << 2);
+            }
+
+            // add offset to sp
+            "10110000_o_nnnnnnn" => {
+                self.ma_execute_spo(o as u8, n << 2);
+            }
+
+            // push pop registers
+            "1011_o_10_b_rrrrrrrr" => {
+                let rlist_bitmask = r as u8;
+                let mut rlist: Vec<usize> = Vec::new();
+                for i in 0..8 {
+                    let bit = (rlist_bitmask >> i) & 1;
+                    if bit == 1 {
+                        rlist.push(i as usize);
+                    }
+                }
+
+                self.mls_exec_pp(memory, o as u8, b as u8, &mut rlist);
+            }
+
+            // Multiple Load Store
+            "1100_o_bbb_rrrrrrrr" => {
+                let rlist_bitmask = r as u8;
+                let mut rlist: Vec<usize> = Vec::new();
+                for i in 0..8 {
+                    let bit = (rlist_bitmask >> i) & 1;
+                    if bit == 1 {
+                        rlist.push(i as usize);
+                    }
+                }
+
+                self.mls_exec_mls(memory, o as u8, b as usize, &mut rlist);
+            }
+
+            // THUMB SWI
+            "11011111_nnnnnnnn" => {
+                // TODO: IMPL AFTER BIOS FUNCTIONS
+                // clk += 2S + 1N
+            }
+
+            // conditional branch
+            "1101_cccc_oooooooo" => {
+                let cond = self.check_condition(c as u8);
+                let offset = (((o as i8) as i32) << 1) as u32;
+
+                self.jc_execute_cb(cond, offset);
+            }
+
+            // unconditional branch
+            "11100_nnnnnnnnnnn" => {
+                let offset = (((((n << 5) as i16) >> 5) as i32) << 1) as u32;
+                let dest = self.registers.pc.wrapping_add(2).wrapping_add(offset) & !1;
+
+                self.registers.pc = dest;
+
+                // clk += 2S + 1N
+            }
+
+            // Long Branch 1st half: LR = PC + 4 + (nn << 12)
+            "11110_nnnnnnnnnnn" => {
+                let imm = ((((n << 5) as i16 as i32) >> 5) << 12) as u32;
+                let data = self.registers.pc.wrapping_add(2).wrapping_add(imm);
+                self.set_register_value(LR, data);
+
+                // clk += 1S
+            }
+
+            // Long Branch 2ns half: PC = LR + (nn << 1), and LR = PC + 2 OR 1
+            "11111_nnnnnnnnnnn" => {
+                let imm = n << 1;
+                let pc_data = self.get_register_value(LR).wrapping_add(imm) & !1;
+                let lr_data = self.registers.pc | 1;
+
+                self.registers.pc = pc_data;
+                self.set_register_value(LR, lr_data);
+
+                // clk += 2S + 1N
+            }
+
+            _ => {
+                error!("invalid thumb instructio detected: {:b}", instruction)
+            }
+        }
+    }
+}
 
 // THUMB Register Op Logic
 impl CPU {
-    pub fn ro_execute_move_shifted(&mut self, opcode: u8, rd: usize, rs: usize, offset: u8) {
+    fn ro_execute_move_shifted(&mut self, opcode: u8, rd: usize, rs: usize, offset: u8) {
         let rs_value = self.get_register_value(rs);
 
         let data: u32 = match opcode {
@@ -97,7 +269,7 @@ impl CPU {
         // clk = 1S
     }
 
-    pub fn ro_execute_add_sub(&mut self, opcode: u8, rd: usize, rs: usize, operand: u8) {
+    fn ro_execute_add_sub(&mut self, opcode: u8, rd: usize, rs: usize, operand: u8) {
         match opcode {
             // ADD (operand is register value)
             0b00 => {
@@ -201,7 +373,7 @@ impl CPU {
         // clk = 1S
     }
 
-    pub fn ro_execute_mcas_op(&mut self, opcode: u8, rd: usize, imm: u8) {
+    fn ro_execute_mcas_op(&mut self, opcode: u8, rd: usize, imm: u8) {
         match opcode {
             // mov
             0b00 => {
@@ -281,7 +453,7 @@ impl CPU {
         self.set_cpsr_bit(Z_FLAG, z_bit);
     }
 
-    pub fn ro_execute_alu_op(&mut self, opcode: u8, rs: usize, rd: usize) {
+    fn ro_execute_alu_op(&mut self, opcode: u8, rs: usize, rd: usize) {
         let rs_value = self.get_register_value(rs);
         let rd_value = self.get_register_value(rd);
         // let mut clk: u32 = 1S;
@@ -493,14 +665,7 @@ impl CPU {
         }
     }
 
-    pub fn ro_execute_hi_reg(
-        &mut self,
-        opcode: u8,
-        msbd: usize,
-        msbs: usize,
-        rs: usize,
-        rd: usize,
-    ) {
+    fn ro_execute_hi_reg(&mut self, opcode: u8, msbd: usize, msbs: usize, rs: usize, rd: usize) {
         let rd = msbd << 3 | rd;
         let rd_value = if rd == PC {
             self.registers.pc.wrapping_add(2)
@@ -582,7 +747,7 @@ impl CPU {
 
 // THUMB load/store logic
 impl CPU {
-    pub fn ls_execute_pcr(&mut self, memory: &mut GBAMemory, rd: usize, imm: u32) -> u32 {
+    fn ls_execute_pcr(&mut self, memory: &mut GBAMemory, rd: usize, imm: u32) -> u32 {
         let pc_value = (self.registers.pc.wrapping_add(2)) & !2;
 
         let addr = pc_value.wrapping_add(imm);
@@ -594,7 +759,7 @@ impl CPU {
         clk
     }
 
-    pub fn ls_execute_ro(
+    fn ls_execute_ro(
         &mut self,
         memory: &mut GBAMemory,
         opcode: u8,
@@ -652,7 +817,7 @@ impl CPU {
         }
     }
 
-    pub fn ls_execute_sh(
+    fn ls_execute_sh(
         &mut self,
         memory: &mut GBAMemory,
         opcode: u8,
@@ -723,7 +888,7 @@ impl CPU {
         }
     }
 
-    pub fn ls_execute_io(
+    fn ls_execute_io(
         &mut self,
         memory: &mut GBAMemory,
         opcode: u8,
@@ -783,7 +948,7 @@ impl CPU {
         }
     }
 
-    pub fn ls_execute_h(
+    fn ls_execute_h(
         &mut self,
         memory: &mut GBAMemory,
         opcode: u8,
@@ -824,13 +989,7 @@ impl CPU {
         }
     }
 
-    pub fn ls_execute_spr(
-        &mut self,
-        memory: &mut GBAMemory,
-        opcode: u8,
-        rd: usize,
-        imm: u32,
-    ) -> u32 {
+    fn ls_execute_spr(&mut self, memory: &mut GBAMemory, opcode: u8, rd: usize, imm: u32) -> u32 {
         let addr = self.get_register_value(SP).wrapping_add(imm);
         match opcode {
             // str
@@ -863,7 +1022,7 @@ impl CPU {
 
 // THUMB Memory Addressing
 impl CPU {
-    pub fn ma_execute_ra(&mut self, opcode: u8, rd: usize, imm: u32) {
+    fn ma_execute_ra(&mut self, opcode: u8, rd: usize, imm: u32) {
         match opcode {
             // add rd, pc, imm
             0 => {
@@ -887,7 +1046,7 @@ impl CPU {
         // clk += 1S
     }
 
-    pub fn ma_execute_spo(&mut self, opcode: u8, imm: u32) {
+    fn ma_execute_spo(&mut self, opcode: u8, imm: u32) {
         let sp_value = self.get_register_value(SP);
 
         let data = match opcode {
@@ -910,7 +1069,7 @@ impl CPU {
 
 // THUMB Multiple Load Store
 impl CPU {
-    pub fn mls_exec_pp(
+    fn mls_exec_pp(
         &mut self,
         memory: &mut GBAMemory,
         opcode: u8,
@@ -961,7 +1120,7 @@ impl CPU {
         }
     }
 
-    pub fn mls_exec_mls(
+    fn mls_exec_mls(
         &mut self,
         memory: &mut GBAMemory,
         opcode: u8,
@@ -1039,7 +1198,7 @@ impl CPU {
 
 // THUMB Jumps and Calls
 impl CPU {
-    pub fn jc_execute_cb(&mut self, cond: bool, offset: u32) {
+    fn jc_execute_cb(&mut self, cond: bool, offset: u32) {
         if !cond {
             return;
             // clk += 1S

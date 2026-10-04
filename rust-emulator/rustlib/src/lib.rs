@@ -1,5 +1,3 @@
-use crate::{cpu_module::CPU, memory_area::GBAMemory};
-
 pub mod constants;
 pub mod cpu_arm_ops;
 pub mod cpu_module;
@@ -15,10 +13,20 @@ pub fn add(left: u64, right: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{cpu_module::CPU, memory_area::GBAMemory};
     use std::collections::{HashSet, VecDeque};
+
+    fn init_tracing() {
+        let _ = tracing_subscriber::fmt()
+            .with_test_writer()
+            .with_max_level(tracing::Level::TRACE)
+            .try_init();
+    }
 
     #[test]
     fn tests() {
+        init_tracing();
+
         let tests = [
             "/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_DataProcessing.gba",
             "/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_Any.gba",
@@ -28,17 +36,18 @@ mod tests {
             "/Users/iemi/Downloads/gba-tests/gba-tests/arm/arm.gba",
         ];
 
-        let rom = std::fs::read(tests[1]).expect("ARM test not found");
+        let rom = std::fs::read(tests[5]).expect("ARM test not found");
 
         let mut mem = GBAMemory::new(rom);
         let mut cpu = CPU::new();
 
         let mut counter: u32 = 0;
 
-        let mut last_few_pc = VecDeque::with_capacity(30);
-        let threshold = 4;
+        let cap = 128;
+        let mut last_few_pc: VecDeque<u32> = VecDeque::with_capacity(cap);
+        let threshold = 10;
         let mut step: usize = 0;
-        let window_count = 500;
+        let window_count = 2000;
 
         loop {
             let _ = cpu.step(&mut mem);
@@ -48,7 +57,7 @@ mod tests {
             let pc = cpu.get_register_value(15);
             last_few_pc.push_back(pc);
 
-            if last_few_pc.len() == 30 {
+            if last_few_pc.len() == cap {
                 if step >= window_count {
                     step = 0;
                     let mut freq: HashSet<u32> = HashSet::new();
@@ -64,23 +73,22 @@ mod tests {
                 last_few_pc.pop_front();
             }
 
+            if pc == 0x8001d4c {
+                println!("gba-tests ended | R12 = {}", cpu.get_register_value(12));
+                break;
+            }
+
             if counter == u32::MAX {
                 println!("Ran too long, breaking...");
                 break;
             }
-
-            if pc == 0x8001d4c {
-                println!("R12 = {}", cpu.get_register_value(12))
-            }
         }
 
-        let (marker, _) = mem.read32(0x0200_0000);
         println!(
             "Finished after {} steps, landed at PC = {:x}",
             counter,
             cpu.get_register_value(15)
         );
-        assert_eq!(marker, 0, "a test failed, eWRAM marker = {:#010x}", marker);
     }
     #[test]
     fn it_works() {

@@ -2,15 +2,7 @@ use crate::constants::*;
 use crate::memory_area::GBAMemory;
 use bitmatch::bitmatch;
 use std::collections::HashMap;
-use tracing::{error, warn};
-
-// fetch
-//   V
-// decode
-//   V
-// execute
-
-// TODO: refactor get_register_value and set_register_value to work for THUMB
+use tracing::{debug, error, info, trace, warn};
 
 // REMINDER: PC IS ADVANCED AFTER FETCH; OPERATIONS USE, BASICALLY, THE OLD PC
 
@@ -46,11 +38,11 @@ impl CPURegisters {
             fiq: [0; 5].to_vec(),
             pointers: HashMap::from([
                 (CPUMode::UserSys, (0x03007F00, 0)),
-                (CPUMode::Fiq, (0x03007F00 - 0x60, 0)),
-                (CPUMode::Supervisor, (0x03007F00 - 0x60 * 2, 0)),
-                (CPUMode::Abort, (0x03007F00 - 0x60 * 3, 0)),
-                (CPUMode::Irq, (0x03007F00 - 0x60 * 4, 0)),
-                (CPUMode::Undefined, (0x03007F00 - 0x60 * 5, 0)),
+                (CPUMode::Fiq, (0, 0)),
+                (CPUMode::Supervisor, (0x03007FE0, 0)),
+                (CPUMode::Abort, (0, 0)),
+                (CPUMode::Irq, (0x03007FA0, 0)),
+                (CPUMode::Undefined, (0, 0)),
             ]),
             pc: 0x08000000,
         }
@@ -61,6 +53,7 @@ pub struct CPU {
     pub registers: CPURegisters,
     pub cpsr: u32,
     pub spsr: HashMap<CPUMode, u32>,
+    debug: bool,
 }
 
 // init
@@ -76,7 +69,12 @@ impl CPU {
                 (CPUMode::Irq, 0),
                 (CPUMode::Undefined, 0),
             ]),
+            debug: false,
         }
+    }
+
+    pub fn enable_debug(&mut self) {
+        self.debug = true;
     }
 }
 
@@ -309,31 +307,18 @@ impl CPU {
     }
 }
 
+// CPU Fetch, Decode, Execute
 impl CPU {
     fn cpu_fetch(&mut self, memory: &mut GBAMemory) -> (u32, u32) {
         match self.get_cpu_state() {
             CPUState::Arm => {
                 let (instruction, read) = memory.read32(self.get_register_value(PC));
-
-                println!(
-                    "ARM STEP: PC=0x{:x}, instruction=0x{:b}",
-                    self.registers.pc, instruction
-                );
-
                 self.registers.pc = self.registers.pc.wrapping_add(4);
-
                 (instruction, read)
             }
             CPUState::Thumb => {
                 let (instruction, read) = memory.read16(self.get_register_value(PC));
-
-                println!(
-                    "THUMB STEP: PC=0x{:x}, instruction=0x{:x}",
-                    self.registers.pc, instruction
-                );
-
                 self.registers.pc = self.registers.pc.wrapping_add(2);
-
                 (instruction as u32, read)
             }
         }
@@ -343,433 +328,10 @@ impl CPU {
     fn cpu_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) {
         match self.get_cpu_state() {
             CPUState::Arm => {
-                #[bitmatch]
-                let "cccc_????????????????????????????" = instruction;
-
-                if self.check_condition(c as u8) {
-                    #[bitmatch]
-                    match instruction {
-                        // B / BL
-                        "????_101_o_nnnnnnnnnnnnnnnnnnnnnnnn" => {
-                            self.b_execute_op(o as u8, n);
-
-                            // 2S + 1N
-                        }
-
-                        // BX
-                        "????_0001_0010_1111_1111_1111_0001_nnnn" => {
-                            self.b_execute_bx(n as u8);
-
-                            // 2S + 1N
-                        }
-
-                        // SWI
-                        "????_1111_nnnnnnnnnnnnnnnnnnnnnnnn" => {
-                            println!("Called SWI but is not implemented yet");
-                            // 2S + 1N
-                        }
-
-                        // PSR Transfer (i = 1, MSR)
-                        "????_00_1_10_p_1_0_f_s_x_c_1111_hhhh_iiiiiiii" => {
-                            let op = i.rotate_right(h * 2);
-
-                            self.psrt_execute_msr_op(
-                                p as u8,
-                                op,
-                                [f as u8, s as u8, x as u8, c as u8],
-                            );
-
-                            // 1S
-                        }
-
-                        // PSR Transfer (i = 0, MRS)
-                        "????_00_0_10_p_0_0_1111_dddd_000000000000" => {
-                            self.psrt_execute_mrs_op(p as u8, d as u8);
-
-                            // 1S
-                        }
-
-                        // PSR Transfer (i = 0, MSR)
-                        "????_00_0_10_p_1_0_f_s_x_c_1111_00000000_mmmm" => {
-                            let op = self.get_register_value(m as usize);
-
-                            self.psrt_execute_msr_op(
-                                p as u8,
-                                op,
-                                [f as u8, s as u8, x as u8, c as u8],
-                            );
-
-                            // 1S
-                        }
-
-                        // alu (i = 1)
-                        "????_00_1_oooo_s_rrrr_dddd_hhhh_nnnnnnnn" => {
-                            let opcode = o as u8;
-                            let rn = self.alu_get_arm_operand_value(r as usize, 1, 0);
-                            let rd = d as u8;
-                            let imm = n;
-                            let op2 = imm.rotate_right(h * 2);
-                            let carry_in = self.get_cpsr_bit(C_FLAG);
-                            let shift_carry = if h != 0 && s == 1 {
-                                Some((op2 >> 31) as u8)
-                            } else {
-                                None
-                            };
-
-                            self.alu_execute_op(
-                                opcode,
-                                rn,
-                                rd,
-                                op2,
-                                s as u8,
-                                (carry_in, shift_carry),
-                            );
-
-                            // (1+p)S+rI+pN
-                        }
-
-                        // alu (i = 0, r = 0)
-                        "????_00_0_oooo_s_rrrr_dddd_hhhhh_tt_0_nnnn" => {
-                            let opcode = o as u8;
-                            let rn = self.alu_get_arm_operand_value(r as usize, 0, 0);
-                            let rd = d as u8;
-                            let rm = self.alu_get_arm_operand_value(n as usize, 0, 0);
-                            let shift = h;
-                            let shift_type = t;
-                            let carry_in = self.get_cpsr_bit(C_FLAG);
-                            let (op2, shift_carry) = self.alu_apply_shift(
-                                shift_type as u8,
-                                rm,
-                                shift as u8,
-                                true,
-                                s as u8,
-                            );
-
-                            self.alu_execute_op(
-                                opcode,
-                                rn,
-                                rd,
-                                op2,
-                                s as u8,
-                                (carry_in, shift_carry),
-                            );
-
-                            // (1+p)S+rI+pN
-                        }
-
-                        // alu (i = 0, r = 1)
-                        "????_00_0_oooo_s_rrrr_dddd_hhhh_0_tt_1_nnnn" => {
-                            let opcode = o as u8;
-                            let rn = self.alu_get_arm_operand_value(r as usize, 0, 1);
-                            let rd = d as u8;
-                            let rm = self.alu_get_arm_operand_value(n as usize, 0, 1);
-                            let rs = self.get_register_value(h as usize) & 0xff;
-                            let shift_type = t;
-                            let carry_in = self.get_cpsr_bit(C_FLAG);
-                            let (op2, shift_carry) = self.alu_apply_shift(
-                                shift_type as u8,
-                                rm,
-                                rs as u8,
-                                false,
-                                s as u8,
-                            );
-
-                            self.alu_execute_op(
-                                opcode,
-                                rn,
-                                rd,
-                                op2,
-                                s as u8,
-                                (carry_in, shift_carry),
-                            );
-
-                            // (1+p)S+rI+pN
-                        }
-
-                        // SWP
-                        "????_00010_b_00_nnnn_dddd_00001001_mmmm" => {
-                            self.swp_execute(memory, b as u8, n as usize, d as usize, m as usize);
-                        }
-
-                        // Multiply & Multiply-Accumulate
-                        "????_000_oooo_s_dddd_nnnn_ffff_1001_mmmm" => {
-                            let op = o as u8;
-                            let rd = d as u8;
-                            let rn = n as u8;
-                            let rs = f as u8;
-                            let rm = m as u8;
-
-                            self.mul_execute_op(op, rd, rn, rs, rm, s as u8);
-
-                            // MUL - 1S + mI
-                            // MLA + MULL (UMULL, SMULL) - 1S + (m+1)I
-                            // MLAL (UMLAL, SMLAL) - 1S + (m+2)I
-                        }
-
-                        // SDT - LDR, STR (i = 0) (immediate offset)
-                        "????_01_0_p_u_b_x_o_nnnn_dddd_iiiiiiiiiiii" => {
-                            let imm = if u == 0 {
-                                -(i as i32)
-                            } else {
-                                i as i32
-                            };
-
-                            self.sdt_execute_op(
-                                memory,
-                                n as usize,
-                                d as usize,
-                                o as u8,
-                                [p as u8, u as u8, b as u8, x as u8],
-                                imm as u32,
-                            );
-                        }
-
-                        // SDT - LDR STR (i = 1) (shifted immediate offset)
-                        "????_01_1_p_u_b_x_o_nnnn_dddd_iiiii_ss_0_mmmm" => {
-                            if m as usize == PC {
-                                error!("Called SDR/LDR with I = 1 and Rm = PC");
-                            } else {
-                                let rm_value = self.get_register_value(m as usize);
-                                let shifted = self.sdt_apply_shift(rm_value, i as u8, s as u8);
-                                let operand = if u == 0 {
-                                    -(shifted as i32)
-                                } else {
-                                    shifted as i32
-                                } as u32;
-
-                                self.sdt_execute_op(
-                                    memory,
-                                    n as usize,
-                                    d as usize,
-                                    o as u8,
-                                    [p as u8, u as u8, b as u8, x as u8],
-                                    operand,
-                                );
-                            };
-                        }
-
-                        // HWord Signed Data Transfer (LDRH, LDRSH, LDRSB, STRH)
-                        "????_000_p_u_i_w_l_nnnn_dddd_aaaa_1_oo_1_bbbb" => {
-                            let offset: i32 = if i == 0 {
-                                if u == 0 {
-                                    -(self.get_register_value(b as usize) as i32)
-                                } else {
-                                    self.get_register_value(b as usize) as i32
-                                }
-                            } else {
-                                let full_imm = a << 4 | b;
-                                if u == 0 {
-                                    -(full_imm as i32)
-                                } else {
-                                    full_imm as i32
-                                }
-                            };
-
-                            self.hsdt_execute_op(
-                                memory,
-                                [p as u8, u as u8, w as u8, l as u8],
-                                n as usize,
-                                d as usize,
-                                o as u8,
-                                offset,
-                            );
-                        }
-
-                        // Block Data Transfer (LDM, STM)
-                        "????_100_p_u_s_w_o_nnnn_rrrrrrrrrrrrrrrr" => {
-                            let rlist_bitmask = r as u16;
-
-                            let mut rlist: Vec<usize> = Vec::new();
-                            for i in 0..16 {
-                                let bit = (rlist_bitmask >> i) & 1;
-                                if bit == 1 {
-                                    rlist.push(i as usize);
-                                }
-                            }
-
-                            self.bdt_execute_op(
-                                memory,
-                                &mut rlist,
-                                o as u8,
-                                [p as u8, u as u8, s as u8, w as u8],
-                                n as usize,
-                            );
-                        }
-
-                        _ => {
-                            error!("Invalid ARM instruction detected: {:b}", instruction);
-                        }
-                    }
-                } else {
-                    // clk +1S
-                }
+                self.arm_decode_execute(memory, instruction);
             }
             CPUState::Thumb => {
-                #[bitmatch]
-                match instruction {
-                    // ADD, SUB
-                    "00011_oo_nnn_sss_ddd" => {
-                        let opcode = o as u8;
-                        let operand = n as u8;
-                        let rs = s as usize;
-                        let rd = d as usize;
-
-                        self.ro_execute_add_sub(opcode, rd, rs, operand);
-                    }
-
-                    // move shifted register
-                    "000_oo_nnnnn_sss_ddd" => {
-                        let opcode = o as u8;
-                        let offset = n as u8;
-                        let rs = s as usize;
-                        let rd = d as usize;
-
-                        self.ro_execute_move_shifted(opcode, rd, rs, offset);
-                    }
-
-                    // mov, cmp, add, sub
-                    "001_oo_ddd_nnnnnnnn" => {
-                        let opcode = o as u8;
-                        let rd = d as usize;
-                        let imm = n as u8;
-                        self.ro_execute_mcas_op(opcode, rd, imm);
-                    }
-
-                    // alu
-                    "010000_oooo_sss_ddd" => {
-                        self.ro_execute_alu_op(o as u8, s as usize, d as usize);
-                    }
-
-                    // hi register ops
-                    "010001_oo_a_b_ccc_ddd" => {
-                        self.ro_execute_hi_reg(
-                            o as u8, a as usize, b as usize, c as usize, d as usize,
-                        );
-                    }
-
-                    // ldr (load imm from literal pool)
-                    "01001_ddd_nnnnnnnn" => {
-                        self.ls_execute_pcr(memory, d as usize, n << 2);
-                    }
-
-                    // load/store with register offset
-                    "0101_oo_0_fff_bbb_ddd" => {
-                        self.ls_execute_ro(memory, o as u8, f as usize, b as usize, d as usize);
-                    }
-
-                    // load/store sign extended byte/halfword
-                    "0101_oo_1_fff_bbb_ddd" => {
-                        self.ls_execute_sh(memory, o as u8, f as usize, b as usize, d as usize);
-                    }
-
-                    // load/store with imm offset
-                    "011_oo_nnnnn_bbb_ddd" => {
-                        self.ls_execute_io(memory, o as u8, n & 0b00011111, b as usize, d as usize);
-                    }
-
-                    // load/store halfword
-                    "1000_o_nnnnn_bbb_ddd" => {
-                        self.ls_execute_h(
-                            memory,
-                            o as u8,
-                            (n & 0b00011111) << 1,
-                            b as usize,
-                            d as usize,
-                        );
-                    }
-
-                    // load/store sp relative
-                    "1001_o_ddd_nnnnnnnn" => {
-                        self.ls_execute_spr(memory, o as u8, d as usize, ((n as u8) as u32) << 2);
-                    }
-
-                    // get relative addr
-                    "1010_o_ddd_nnnnnnnn" => {
-                        self.ma_execute_ra(o as u8, d as usize, n << 2);
-                    }
-
-                    // add offset to sp
-                    "10110000_o_nnnnnnn" => {
-                        self.ma_execute_spo(o as u8, n << 2);
-                    }
-
-                    // push pop registers
-                    "1011_o_10_b_rrrrrrrr" => {
-                        let rlist_bitmask = r as u8;
-                        let mut rlist: Vec<usize> = Vec::new();
-                        for i in 0..8 {
-                            let bit = (rlist_bitmask >> i) & 1;
-                            if bit == 1 {
-                                rlist.push(i as usize);
-                            }
-                        }
-
-                        self.mls_exec_pp(memory, o as u8, b as u8, &mut rlist);
-                    }
-
-                    // Multiple Load Store
-                    "1100_o_bbb_rrrrrrrr" => {
-                        let rlist_bitmask = r as u8;
-                        let mut rlist: Vec<usize> = Vec::new();
-                        for i in 0..8 {
-                            let bit = (rlist_bitmask >> i) & 1;
-                            if bit == 1 {
-                                rlist.push(i as usize);
-                            }
-                        }
-
-                        self.mls_exec_mls(memory, o as u8, b as usize, &mut rlist);
-                    }
-
-                    // THUMB SWI
-                    "11011111_nnnnnnnn" => {
-                        // TODO: IMPL AFTER BIOS FUNCTIONS
-                        // clk += 2S + 1N
-                    }
-
-                    // conditional branch
-                    "1101_cccc_oooooooo" => {
-                        let cond = self.check_condition(c as u8);
-                        let offset = (((o as i8) as i32) << 1) as u32;
-
-                        self.jc_execute_cb(cond, offset);
-                    }
-
-                    // unconditional branch
-                    "11100_nnnnnnnnnnn" => {
-                        let offset = (((((n << 5) as i16) >> 5) as i32) << 1) as u32;
-                        let dest = self.registers.pc.wrapping_add(2).wrapping_add(offset) & !1;
-
-                        self.registers.pc = dest;
-
-                        // clk += 2S + 1N
-                    }
-
-                    // Long Branch 1st half: LR = PC + 4 + (nn << 12)
-                    "11110_nnnnnnnnnnn" => {
-                        let imm = ((((n << 5) as i16 as i32) >> 5) << 12) as u32;
-                        let data = self.registers.pc.wrapping_add(2).wrapping_add(imm);
-                        self.set_register_value(LR, data);
-
-                        // clk += 1S
-                    }
-
-                    // Long Branch 2ns half: PC = LR + (nn << 1), and LR = PC + 2 OR 1
-                    "11111_nnnnnnnnnnn" => {
-                        let imm = n << 1;
-                        let pc_data = self.get_register_value(LR).wrapping_add(imm) & !1;
-                        let lr_data = self.registers.pc | 1;
-
-                        self.registers.pc = pc_data;
-                        self.set_register_value(LR, lr_data);
-
-                        // clk += 2S + 1N
-                    }
-
-                    _ => {
-                        error!("invalid thumb instructio detected: {:b}", instruction)
-                    }
-                }
+                self.thumb_decode_execute(memory, instruction);
             }
         }
     }

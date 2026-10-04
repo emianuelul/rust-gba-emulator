@@ -1,7 +1,257 @@
 use crate::constants::*;
 use crate::cpu_module::*;
 use crate::memory_area::*;
+use bitmatch::bitmatch;
 use tracing::{error, warn};
+
+// ARM Debug Execute Logic
+impl CPU {
+    #[bitmatch]
+    pub fn arm_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) {
+        #[bitmatch]
+        let "cccc_????????????????????????????" = instruction;
+
+        if self.check_condition(c as u8) {
+            #[bitmatch]
+            match instruction {
+                // B / BL
+                "????_101_o_nnnnnnnnnnnnnnnnnnnnnnnn" => {
+                    self.b_execute_op(o as u8, n);
+
+                    // 2S + 1N
+                }
+
+                // BX
+                "????_0001_0010_1111_1111_1111_0001_nnnn" => {
+                    self.b_execute_bx(n as u8);
+
+                    // 2S + 1N
+                }
+
+                // SWI
+                "????_1111_nnnnnnnnnnnnnnnnnnnnnnnn" => {
+                    tracing::warn!("Called SWI (not implemented)");
+                    // 2S + 1N
+                }
+
+                // PSR Transfer (i = 1, MSR)
+                "????_00_1_10_p_1_0_f_s_x_c_1111_hhhh_iiiiiiii" => {
+                    let op = i.rotate_right(h * 2);
+
+                    self.psrt_execute_msr_op(p as u8, op, [f as u8, s as u8, x as u8, c as u8]);
+
+                    // 1S
+                }
+
+                // PSR Transfer (i = 0, MRS)
+                "????_00_0_10_p_0_0_1111_dddd_000000000000" => {
+                    self.psrt_execute_mrs_op(p as u8, d as u8);
+
+                    // 1S
+                }
+
+                // PSR Transfer (i = 0, MSR)
+                "????_00_0_10_p_1_0_f_s_x_c_1111_00000000_mmmm" => {
+                    let op = self.get_register_value(m as usize);
+
+                    self.psrt_execute_msr_op(p as u8, op, [f as u8, s as u8, x as u8, c as u8]);
+
+                    // 1S
+                }
+
+                // alu (i = 1)
+                "????_00_1_oooo_s_rrrr_dddd_hhhh_nnnnnnnn" => {
+                    let opcode = o as u8;
+                    let rn = self.alu_get_arm_operand_value(r as usize, 1, 0);
+                    let rd = d as usize;
+                    let imm = n;
+                    let op2 = imm.rotate_right(h * 2);
+                    let carry_in = self.get_cpsr_bit(C_FLAG);
+                    let shift_carry = if h != 0 && s == 1 {
+                        Some((op2 >> 31) as u8)
+                    } else {
+                        None
+                    };
+
+                    self.alu_execute_op(
+                        opcode,
+                        (r as usize, rn),
+                        rd,
+                        op2,
+                        s as u8,
+                        (carry_in, shift_carry),
+                    );
+
+                    // (1+p)S+rI+pN
+                }
+
+                // alu (i = 0, r = 0)
+                "????_00_0_oooo_s_rrrr_dddd_hhhhh_tt_0_nnnn" => {
+                    let opcode = o as u8;
+                    let rn = self.alu_get_arm_operand_value(r as usize, 0, 0);
+                    let rd = d as usize;
+                    let rm = self.alu_get_arm_operand_value(n as usize, 0, 0);
+                    let shift = h;
+                    let shift_type = t;
+                    let carry_in = self.get_cpsr_bit(C_FLAG);
+                    let (op2, shift_carry) =
+                        self.alu_apply_shift(shift_type as u8, rm, shift as u8, true, s as u8);
+
+                    self.alu_execute_op(
+                        opcode,
+                        (r as usize, rn),
+                        rd,
+                        op2,
+                        s as u8,
+                        (carry_in, shift_carry),
+                    );
+
+                    // (1+p)S+rI+pN
+                }
+
+                // alu (i = 0, r = 1)
+                "????_00_0_oooo_s_rrrr_dddd_hhhh_0_tt_1_nnnn" => {
+                    let opcode = o as u8;
+                    let rn = self.alu_get_arm_operand_value(r as usize, 0, 1);
+                    let rd = d as usize;
+                    let rm = self.alu_get_arm_operand_value(n as usize, 0, 1);
+                    let rs = self.get_register_value(h as usize) & 0xff;
+                    let shift_type = t;
+                    let carry_in = self.get_cpsr_bit(C_FLAG);
+                    let (op2, shift_carry) =
+                        self.alu_apply_shift(shift_type as u8, rm, rs as u8, false, s as u8);
+
+                    self.alu_execute_op(
+                        opcode,
+                        (r as usize, rn),
+                        rd,
+                        op2,
+                        s as u8,
+                        (carry_in, shift_carry),
+                    );
+
+                    // (1+p)S+rI+pN
+                }
+
+                // SWP
+                "????_00010_b_00_nnnn_dddd_00001001_mmmm" => {
+                    self.swp_execute(memory, b as u8, n as usize, d as usize, m as usize);
+                }
+
+                // Multiply & Multiply-Accumulate
+                "????_000_oooo_s_dddd_nnnn_ffff_1001_mmmm" => {
+                    let op = o as u8;
+                    let rd = d as u8;
+                    let rn = n as u8;
+                    let rs = f as u8;
+                    let rm = m as u8;
+
+                    self.mul_execute_op(op, rd, rn, rs, rm, s as u8);
+
+                    // MUL - 1S + mI
+                    // MLA + MULL (UMULL, SMULL) - 1S + (m+1)I
+                    // MLAL (UMLAL, SMLAL) - 1S + (m+2)I
+                }
+
+                // SDT - LDR, STR (i = 0) (immediate offset)
+                "????_01_0_p_u_b_x_o_nnnn_dddd_iiiiiiiiiiii" => {
+                    let imm = if u == 0 {
+                        -(i as i32)
+                    } else {
+                        i as i32
+                    };
+
+                    self.sdt_execute_op(
+                        memory,
+                        n as usize,
+                        d as usize,
+                        o as u8,
+                        [p as u8, u as u8, b as u8, x as u8],
+                        imm as u32,
+                    );
+                }
+
+                // SDT - LDR STR (i = 1) (shifted immediate offset)
+                "????_01_1_p_u_b_x_o_nnnn_dddd_iiiii_ss_0_mmmm" => {
+                    if m as usize == PC {
+                        error!("Called SDR/LDR with I = 1 and Rm = PC");
+                    } else {
+                        let rm_value = self.get_register_value(m as usize);
+                        let shifted = self.sdt_apply_shift(rm_value, i as u8, s as u8);
+                        let operand = if u == 0 {
+                            -(shifted as i32)
+                        } else {
+                            shifted as i32
+                        } as u32;
+
+                        self.sdt_execute_op(
+                            memory,
+                            n as usize,
+                            d as usize,
+                            o as u8,
+                            [p as u8, u as u8, b as u8, x as u8],
+                            operand,
+                        );
+                    };
+                }
+
+                // HWord Signed Data Transfer (LDRH, LDRSH, LDRSB, STRH)
+                "????_000_p_u_i_w_l_nnnn_dddd_aaaa_1_oo_1_bbbb" => {
+                    let offset: i32 = if i == 0 {
+                        if u == 0 {
+                            -(self.get_register_value(b as usize) as i32)
+                        } else {
+                            self.get_register_value(b as usize) as i32
+                        }
+                    } else {
+                        let full_imm = a << 4 | b;
+                        if u == 0 {
+                            -(full_imm as i32)
+                        } else {
+                            full_imm as i32
+                        }
+                    };
+
+                    self.hsdt_execute_op(
+                        memory,
+                        [p as u8, u as u8, w as u8, l as u8],
+                        n as usize,
+                        d as usize,
+                        o as u8,
+                        offset,
+                    );
+                }
+
+                // Block Data Transfer (LDM, STM)
+                "????_100_p_u_s_w_o_nnnn_rrrrrrrrrrrrrrrr" => {
+                    let rlist_bitmask = r as u16;
+
+                    let mut rlist: Vec<usize> = Vec::new();
+                    for i in 0..16 {
+                        let bit = (rlist_bitmask >> i) & 1;
+                        if bit == 1 {
+                            rlist.push(i as usize);
+                        }
+                    }
+
+                    self.bdt_execute_op(
+                        memory,
+                        &mut rlist,
+                        o as u8,
+                        [p as u8, u as u8, s as u8, w as u8],
+                        n as usize,
+                    );
+                }
+
+                _ => {
+                    error!("Invalid ARM instruction detected: {:b}", instruction);
+                }
+            }
+        } else {
+            // clk +1S
+        }
+    }
+}
 
 // ARM B, BX Logic
 impl CPU {
@@ -9,24 +259,31 @@ impl CPU {
         ((value << 8) as i32) >> 8
     }
 
-    pub fn b_execute_op(&mut self, op: u8, n: u32) {
+    fn b_execute_op(&mut self, op: u8, n: u32) {
         if op == 0 {
             // B
-            self.registers.pc =
-                (self.registers.pc as i32 + 4 + self.b_convert_u24_to_i32(n) * 4) as u32;
+            tracing::debug!("ARM: B #{:08X}", n);
+            self.registers.pc = ((self.registers.pc as i32)
+                .wrapping_add(4)
+                .wrapping_add(self.b_convert_u24_to_i32(n) * 4))
+                as u32;
 
             // 2S + 1N
         } else {
             // BL
+            tracing::debug!("ARM: BL #{:08X}", n);
             self.set_register_value(LR, self.registers.pc);
-            self.registers.pc =
-                (self.registers.pc as i32 + 4 + self.b_convert_u24_to_i32(n) * 4) as u32;
+            self.registers.pc = ((self.registers.pc as i32)
+                .wrapping_add(4)
+                .wrapping_add(self.b_convert_u24_to_i32(n) * 4))
+                as u32;
 
             // 2S + 1N
         }
     }
 
-    pub fn b_execute_bx(&mut self, n: u8) {
+    fn b_execute_bx(&mut self, n: u8) {
+        tracing::debug!("ARM: BX R{}", n);
         if n == 15 {
             self.registers.pc = self.registers.pc.wrapping_add(4);
             // 2S + 1N
@@ -48,12 +305,12 @@ impl CPU {
 
 // ARM ALU Logic
 impl CPU {
-    pub fn alu_get_arm_operand_value(&self, index: usize, i: u8, r: u8) -> u32 {
+    fn alu_get_arm_operand_value(&self, index: usize, i: u8, r: u8) -> u32 {
         if index == PC {
             if i == 0 && r == 1 {
-                self.registers.pc + 8
+                self.registers.pc.wrapping_add(8)
             } else {
-                self.registers.pc + 4
+                self.registers.pc.wrapping_add(4)
             }
         } else {
             self.get_register_value(index)
@@ -80,11 +337,11 @@ impl CPU {
         (result, carry)
     }
 
-    pub fn alu_execute_op(
+    fn alu_execute_op(
         &mut self,
         opcode: u8,
-        rn_value: u32,
-        rd: u8,
+        rn: (usize, u32),
+        rd: usize,
         op2: u32,
         s: u8,
         carry: (u8, Option<u8>),
@@ -92,6 +349,8 @@ impl CPU {
         let mode: CPUMode = self.get_cpu_mode();
         let carry_in = carry.0;
         let shift_carry = carry.1;
+
+        let rn_value = rn.1;
 
         let s: u8 = if s == 1 && rd == 15 {
             if mode != CPUMode::Sys && mode != CPUMode::User {
@@ -103,7 +362,7 @@ impl CPU {
 
                 0
             } else {
-                error!("CPUMode is {:?} and Rd = PC", mode);
+                error!("ALU CPUMode is {:?} and Rd = PC", mode);
 
                 s
             }
@@ -114,6 +373,7 @@ impl CPU {
         match opcode {
             // AND
             0x0 => {
+                tracing::debug!("ARM: AND R{rd} R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value & op2;
 
                 if s == 1 {
@@ -123,11 +383,12 @@ impl CPU {
                     }
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // EOR
             0x1 => {
+                tracing::debug!("ARM: EOR R{rd} R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value ^ op2;
 
                 if s == 1 {
@@ -137,11 +398,12 @@ impl CPU {
                     }
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // SUB
             0x2 => {
+                tracing::debug!("ARM: SUB R{rd} R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value.wrapping_sub(op2);
 
                 if s == 1 {
@@ -154,11 +416,12 @@ impl CPU {
                     self.set_cpsr_bit(V_FLAG, v_bit);
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // RSB
             0x3 => {
+                tracing::debug!("ARM: RSB R{rd} R{} Op2:{:08X}", rn.0, op2);
                 let data = op2.wrapping_sub(rn_value);
 
                 if s == 1 {
@@ -171,11 +434,12 @@ impl CPU {
                     self.set_cpsr_bit(V_FLAG, v_bit);
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // ADD
             0x4 => {
+                tracing::debug!("ARM: ADD R{rd} R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value.wrapping_add(op2);
 
                 if s == 1 {
@@ -187,11 +451,13 @@ impl CPU {
                     self.set_cpsr_bit(V_FLAG, v_bit);
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // ADC
             0x5 => {
+                tracing::debug!("ARM: ADC R{rd} R{} Op2:{:08X}", rn.0, op2);
+
                 let full = rn_value as u64 + op2 as u64 + carry_in as u64;
                 let data = full as u32;
 
@@ -209,11 +475,13 @@ impl CPU {
                     self.set_cpsr_bit(V_FLAG, v_bit);
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // SBC
             0x6 => {
+                tracing::debug!("ARM: SBC R{rd} R{} Op2:{:08X}", rn.0, op2);
+
                 let borrow = 1 - carry_in as u32;
                 let data = rn_value.wrapping_sub(op2).wrapping_sub(borrow);
 
@@ -231,11 +499,12 @@ impl CPU {
                     self.set_cpsr_bit(V_FLAG, v_bit);
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // RSC
             0x7 => {
+                tracing::debug!("ARM: RSC R{rd} R{} Op2:{:08X}", rn.0, op2);
                 let borrow = 1 - carry_in as u32;
                 let data = op2.wrapping_sub(rn_value).wrapping_sub(borrow);
 
@@ -253,11 +522,12 @@ impl CPU {
                     self.set_cpsr_bit(V_FLAG, v_bit);
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // TST
             0x8 => {
+                tracing::debug!("ARM: TST R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value & op2;
 
                 if s == 1 && rd != 15 {
@@ -272,6 +542,7 @@ impl CPU {
 
             // TEQ
             0x9 => {
+                tracing::debug!("ARM: TEQ R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value ^ op2;
 
                 if s == 1 && rd != 15 {
@@ -286,6 +557,7 @@ impl CPU {
 
             // CMP
             0xA => {
+                tracing::debug!("ARM: CMP R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value.wrapping_sub(op2);
 
                 if s == 1 && rd != 15 {
@@ -302,6 +574,7 @@ impl CPU {
 
             // CMN
             0xB => {
+                tracing::debug!("ARM: CMN R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value.wrapping_add(op2);
 
                 if s == 1 && rd != 15 {
@@ -318,6 +591,7 @@ impl CPU {
 
             // ORR
             0xC => {
+                tracing::debug!("ARM: ORR R{rd} R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value | op2;
 
                 if s == 1 {
@@ -327,11 +601,12 @@ impl CPU {
                     }
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // MOV
             0xD => {
+                tracing::debug!("ARM: MOV R{} Op2:{:08X}", rd, op2);
                 if s == 1 {
                     self.alu_set_n_z_flags(op2);
                     if let Some(c) = shift_carry {
@@ -339,11 +614,12 @@ impl CPU {
                     }
                 }
 
-                self.set_register_value(rd as usize, op2);
+                self.set_register_value(rd, op2);
             }
 
             // BIC
             0xE => {
+                tracing::debug!("ARM: BIC R{rd} R{} Op2:{:08X}", rn.0, op2);
                 let data = rn_value & !op2;
 
                 if s == 1 {
@@ -353,11 +629,12 @@ impl CPU {
                     }
                 }
 
-                self.set_register_value(rd as usize, data);
+                self.set_register_value(rd, data);
             }
 
             // MVN
             0xF => {
+                tracing::debug!("ARM: MVN R{} Op2:{:08X}", rd, op2);
                 if s == 1 {
                     self.alu_set_n_z_flags(!op2);
                     if let Some(c) = shift_carry {
@@ -365,7 +642,7 @@ impl CPU {
                     }
                 }
 
-                self.set_register_value(rd as usize, !op2);
+                self.set_register_value(rd, !op2);
             }
             _ => {
                 unreachable!()
@@ -373,7 +650,7 @@ impl CPU {
         }
     }
 
-    pub fn alu_apply_shift(
+    fn alu_apply_shift(
         &self,
         shift_type: u8,
         to_shift: u32,
@@ -477,7 +754,7 @@ impl CPU {
 
 // ARM MUL Logic
 impl CPU {
-    pub fn mul_execute_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
+    fn mul_execute_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
         let rs_value = self.get_register_value(rs as usize);
         let rm_value = self.get_register_value(rm as usize);
 
@@ -487,6 +764,7 @@ impl CPU {
         match op {
             // MUL
             0b0000 => {
+                tracing::debug!("ARM: MUL Rd{} Rm{} Rs{}", rd, rm, rs);
                 if rd == PC as u8 || rs == PC as u8 || rm == PC as u8 {
                     error!("MUL called with invalid args (Arg is PC)");
                     return 0;
@@ -509,6 +787,7 @@ impl CPU {
 
             // MLA
             0b0001 => {
+                tracing::debug!("ARM: MLA Rd{} Rm{} Rs{} Rn{}", rd, rm, rs, rn);
                 if rn == PC as u8 || rd == PC as u8 || rs == PC as u8 || rm == PC as u8 {
                     error!("MLA called with invalid args (Arg is PC)");
                     return 0;
@@ -533,6 +812,7 @@ impl CPU {
 
             // UMULL
             0b0100 => {
+                tracing::debug!("ARM: UMULL RdLo{} RdHi{} Rm{} Rs{}", rn, rd, rm, rs);
                 if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rs == PC as u8 {
                     error!("UMULL called with invalid args (arg may not be PC)");
                     return 0;
@@ -559,6 +839,7 @@ impl CPU {
 
             // UMLAL
             0b0101 => {
+                tracing::debug!("ARM: UMLAL RdLo{} RdHi{} Rm{} Rs{}", rn, rd, rm, rs);
                 if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rs == PC as u8 {
                     error!("UMLAL called with invalid args (arg may not be PC)");
                     return 0;
@@ -590,6 +871,7 @@ impl CPU {
 
             // SMULL
             0b0110 => {
+                tracing::debug!("ARM: SMULL RdLo{} RdHi{} Rm{} Rs{}", rn, rd, rm, rs);
                 if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rs == PC as u8 {
                     error!("SMULL called with invalid args (arg may not be PC)");
                     return 0;
@@ -616,6 +898,7 @@ impl CPU {
 
             // SMLAL
             0b0111 => {
+                tracing::debug!("ARM: SMLAL RdLo{} RdHi{} Rm{} Rs{}", rn, rd, rm, rs);
                 if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rs == PC as u8 {
                     error!("SMLAL called with invalid args (arg may not be PC)");
 
@@ -691,7 +974,20 @@ impl CPU {
         new_psr
     }
 
-    pub fn psrt_execute_msr_op(&mut self, p: u8, op: u32, write_arr: [u8; 4]) {
+    fn psrt_execute_msr_op(&mut self, p: u8, op: u32, write_arr: [u8; 4]) {
+        tracing::debug!(
+            "ARM: MSR PSR{} Op{:08X}",
+            if p == 0 {
+                format!("CPSR: {}", self.cpsr)
+            } else {
+                format!(
+                    "SPSR: {}",
+                    *self.spsr.get(&self.get_effective_cpu_mode()).unwrap()
+                )
+            },
+            op
+        );
+
         let curr_mode = self.get_effective_cpu_mode();
         if p == 1 && curr_mode == CPUMode::UserSys {
             error!("Called MSR with SPSR but current mode is User/Sys");
@@ -720,7 +1016,19 @@ impl CPU {
         }
     }
 
-    pub fn psrt_execute_mrs_op(&mut self, p: u8, rd: u8) {
+    fn psrt_execute_mrs_op(&mut self, p: u8, rd: u8) {
+        tracing::debug!(
+            "ARM: MRS Rd{} PSR{}",
+            rd,
+            if p == 0 {
+                format!("CPSR: {}", self.cpsr)
+            } else {
+                format!(
+                    "SPSR: {}",
+                    *self.spsr.get(&self.get_effective_cpu_mode()).unwrap()
+                )
+            },
+        );
         let curr_mode = self.get_effective_cpu_mode();
         if p == 1 && curr_mode == CPUMode::UserSys {
             error!("Called MRS with SPSR in User/Sys mode");
@@ -745,7 +1053,7 @@ impl CPU {
         (to_shift >> 1) | ((old_c as u32) << 31)
     }
 
-    pub fn sdt_apply_shift(&mut self, to_shift: u32, amount: u8, shift_type: u8) -> u32 {
+    fn sdt_apply_shift(&mut self, to_shift: u32, amount: u8, shift_type: u8) -> u32 {
         match shift_type {
             0 => {
                 if amount == 0 {
@@ -853,7 +1161,7 @@ impl CPU {
     ) -> u32 {
         let mut clk: u32 = 0;
         let rn_value = if rn == PC {
-            self.registers.pc + 4
+            self.registers.pc.wrapping_add(4)
         } else {
             self.get_register_value(rn)
         };
@@ -863,6 +1171,16 @@ impl CPU {
             // post indexing
             read_addr = rn_value;
 
+            tracing::debug!(
+                "ARM: LDR{} Rd{} <{:08X}>",
+                if flags[2] == 1 {
+                    "B"
+                } else {
+                    ""
+                },
+                rd,
+                read_addr
+            );
             let (data, io_clk) = self.sdt_read_data(memory, read_addr, flags[2]);
             let data = if rd == PC {
                 data & !3
@@ -884,6 +1202,16 @@ impl CPU {
             // pre indexing
             read_addr = ((rn_value as i32).wrapping_add(operand as i32)) as u32;
 
+            tracing::debug!(
+                "ARM: LDR{} Rd{} <{:08X}>",
+                if flags[2] == 1 {
+                    "B"
+                } else {
+                    ""
+                },
+                rd,
+                read_addr
+            );
             let (data, io_clk) = self.sdt_read_data(memory, read_addr, flags[2]);
             let data = if rd == PC {
                 data & !3
@@ -915,13 +1243,13 @@ impl CPU {
         let mut clk: u32 = 0;
 
         let rn_value = if rn == PC {
-            self.registers.pc + 4
+            self.registers.pc.wrapping_add(4)
         } else {
             self.get_register_value(rn)
         };
 
         let rd_value = if rd == PC {
-            self.registers.pc + 8
+            self.registers.pc.wrapping_add(8)
         } else {
             self.get_register_value(rd)
         };
@@ -932,15 +1260,35 @@ impl CPU {
             // post indexing
             let addr = rn_value;
 
+            tracing::debug!(
+                "ARM: STR{} Rd{} <{:08X}>",
+                if flags[2] == 1 {
+                    "B"
+                } else {
+                    ""
+                },
+                rd,
+                addr
+            );
             let io_clk = self.sdt_write_data(memory, addr, data, flags[2]);
 
-            self.set_register_value(rn, (addr as i32 + operand as i32) as u32);
+            self.set_register_value(rn, ((addr as i32).wrapping_add(operand as i32)) as u32);
 
             clk += io_clk;
         } else {
             // pre indexing
-            let addr = (rn_value as i32 + operand as i32) as u32;
+            let addr = ((rn_value as i32).wrapping_add(operand as i32)) as u32;
 
+            tracing::debug!(
+                "ARM: STR{} Rd{} <{:08X}>",
+                if flags[2] == 1 {
+                    "B"
+                } else {
+                    ""
+                },
+                rd,
+                addr
+            );
             let io_clk = self.sdt_write_data(memory, addr, data, flags[2]);
 
             if flags[3] == 1 {
@@ -954,7 +1302,7 @@ impl CPU {
         clk
     }
 
-    pub fn sdt_execute_op(
+    fn sdt_execute_op(
         &mut self,
         memory: &mut GBAMemory,
         rn: usize,
@@ -984,12 +1332,12 @@ impl CPU {
         let mut clk: u32 = 0;
 
         let rn_value = if rn == PC {
-            self.registers.pc + 4
+            self.registers.pc.wrapping_add(4)
         } else {
             self.get_register_value(rn)
         };
         let rd_value = if rd == PC {
-            self.registers.pc + 8
+            self.registers.pc.wrapping_add(8)
         } else {
             self.get_register_value(rd)
         };
@@ -997,13 +1345,14 @@ impl CPU {
         let addr = if flags[0] == 0 {
             rn_value
         } else {
-            (rn_value as i32 + offset) as u32
+            ((rn_value as i32).wrapping_add(offset)) as u32
         };
 
+        tracing::debug!("ARM: STRH Rd{}, <{:08X}>", rd, addr);
         clk += memory.write16(addr, rd_value as u16);
 
         if flags[0] == 0 {
-            self.set_register_value(rn, (addr as i32 + offset) as u32);
+            self.set_register_value(rn, ((addr as i32).wrapping_add(offset)) as u32);
         } else {
             if flags[2] == 1 {
                 self.set_register_value(rn, addr);
@@ -1027,7 +1376,7 @@ impl CPU {
 
         let rn_value = if rn == PC {
             // clk += (1S + 1N)
-            self.registers.pc + 4
+            self.registers.pc.wrapping_add(4)
         } else {
             self.get_register_value(rn)
         };
@@ -1039,6 +1388,7 @@ impl CPU {
         };
 
         let (data, io) = if opcode == 0b01 {
+            tracing::debug!("ARM: LDRH Rd{}, <{:08X}>", rd, addr);
             let result = memory.read16(addr);
             if !addr.is_multiple_of(2) {
                 ((result.0 as u32).rotate_right(8), result.1)
@@ -1046,9 +1396,11 @@ impl CPU {
                 (result.0 as u32, result.1)
             }
         } else if opcode == 0b10 {
+            tracing::debug!("ARM: LDRSB Rd{}, <{:08X}>", rd, addr);
             let result = memory.read8(addr);
             (result.0 as i8 as i32 as u32, result.1)
         } else {
+            tracing::debug!("ARM: LDRSH Rd{}, <{:08X}>", rd, addr);
             if !addr.is_multiple_of(2) {
                 let result = memory.read8(addr);
                 (result.0 as i8 as i32 as u32, result.1)
@@ -1077,7 +1429,7 @@ impl CPU {
     // u - up-down
     // w - writeback
     // l - load-store
-    pub fn hsdt_execute_op(
+    fn hsdt_execute_op(
         &mut self,
         memory: &mut GBAMemory,
         flags: [u8; 4],
@@ -1096,7 +1448,7 @@ impl CPU {
                 }
 
                 _ => {
-                    error!("Opcode: {:b} used in store mode", opcode);
+                    error!("STRH Opcode: {:b} used in store mode", opcode);
                 }
             }
         } else {
@@ -1144,7 +1496,7 @@ impl CPU {
     // u - up_down
     // s - load psr
     // w - write-back
-    pub fn bdt_execute_op(
+    fn bdt_execute_op(
         &mut self,
         memory: &mut GBAMemory,
         rlist: &mut Vec<usize>,
@@ -1185,6 +1537,7 @@ impl CPU {
         match opcode {
             // STM - [rn+offset] = rlist[current_index]
             0 => {
+                tracing::debug!("ARM: STM Rn{} Rlist:{:?}", rn, rlist);
                 let mut addr = start_addr;
                 for (index, &reg) in rlist.iter().enumerate() {
                     let data = if reg == PC {
@@ -1210,6 +1563,7 @@ impl CPU {
 
             // LDM
             1 => {
+                tracing::debug!("ARM: LDM Rn{} Rlist:{:?}", rn, rlist);
                 let change_psr = !was_empty && rlist.contains(&PC) && s_bit;
                 let load_user_reg = !change_psr && s_bit;
 
@@ -1257,7 +1611,7 @@ impl CPU {
 
 // ARM SWP Logic
 impl CPU {
-    pub fn swp_execute(
+    fn swp_execute(
         &mut self,
         memory: &mut GBAMemory,
         byte_word: u8,
@@ -1270,15 +1624,21 @@ impl CPU {
         let rn_value = self.get_register_value(rn);
         let rm_value = self.get_register_value(rm);
 
-        let (data, mem_clk) = if byte_word == 0 {
-            memory.read32(rn_value)
-        } else {
-            let x = memory.read8(rn_value);
-            (x.0 as u32, x.1)
-        };
-        clk += mem_clk;
-
+        tracing::debug!(
+            "ARM: SWP{} Rd{}, Rm{}, <{:08X}>",
+            if byte_word == 1 {
+                "B"
+            } else {
+                ""
+            },
+            rd,
+            rm,
+            rn_value
+        );
+        let addr = rn_value;
+        let (data, mem_clk) = self.sdt_read_data(memory, addr, byte_word);
         self.set_register_value(rd, data);
+        clk += mem_clk;
 
         let mem_clk = if byte_word == 0 {
             memory.write32(rn_value, rm_value)
