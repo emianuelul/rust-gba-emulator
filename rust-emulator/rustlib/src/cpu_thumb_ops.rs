@@ -124,7 +124,7 @@ impl CPU {
 
             // THUMB SWI
             "11011111_nnnnnnnn" => {
-                // TODO: IMPL AFTER BIOS FUNCTIONS
+                tracing::warn!("Called THUMB SWI but it's not implemented");
                 // clk += 2S + 1N
             }
 
@@ -133,6 +133,7 @@ impl CPU {
                 let cond = self.check_condition(c as u8);
                 let offset = (((o as i8) as i32) << 1) as u32;
 
+                tracing::debug!("THUMB: Conditional Branch cond:{:01X} offset:{}", c, offset);
                 self.jc_execute_cb(cond, offset);
             }
 
@@ -141,6 +142,7 @@ impl CPU {
                 let offset = (((((n << 5) as i16) >> 5) as i32) << 1) as u32;
                 let dest = self.registers.pc.wrapping_add(2).wrapping_add(offset) & !1;
 
+                tracing::debug!("THUMB: B <PC + offset:{} = {}>", offset, dest);
                 self.registers.pc = dest;
 
                 // clk += 2S + 1N
@@ -150,6 +152,7 @@ impl CPU {
             "11110_nnnnnnnnnnn" => {
                 let imm = ((((n << 5) as i16 as i32) >> 5) << 12) as u32;
                 let data = self.registers.pc.wrapping_add(2).wrapping_add(imm);
+                tracing::debug!("THUMB: Long Branch LR = <PC + offset:{} = {}>", imm, data);
                 self.set_register_value(LR, data);
 
                 // clk += 1S
@@ -160,6 +163,13 @@ impl CPU {
                 let imm = n << 1;
                 let pc_data = self.get_register_value(LR).wrapping_add(imm) & !1;
                 let lr_data = self.registers.pc | 1;
+
+                tracing::debug!(
+                    "THUMB: BL nn:{} | PC = LR + {}; LR = {}",
+                    imm,
+                    pc_data,
+                    lr_data
+                );
 
                 self.registers.pc = pc_data;
                 self.set_register_value(LR, lr_data);
@@ -182,6 +192,7 @@ impl CPU {
         let data: u32 = match opcode {
             // lsl
             0b00 => {
+                tracing::debug!("THUMB: LSL Rd{} Rs{} #{}", rd, rs, offset);
                 let value = if offset == 0 {
                     rs_value
                 } else if offset >= 32 {
@@ -209,6 +220,7 @@ impl CPU {
 
             // lsr
             0b01 => {
+                tracing::debug!("THUMB: LSR Rd{} Rs{} #{}", rd, rs, offset);
                 let value = if offset == 0 || offset >= 32 {
                     0
                 } else {
@@ -233,6 +245,7 @@ impl CPU {
 
             // asr
             0b10 => {
+                tracing::debug!("THUMB: ASR Rd{} Rs{} #{}", rd, rs, offset);
                 let value = if offset == 0 || offset >= 32 {
                     let sign = (rs_value >> 31) & 1;
                     if sign == 1 {
@@ -273,6 +286,7 @@ impl CPU {
         match opcode {
             // ADD (operand is register value)
             0b00 => {
+                tracing::debug!("THUMB: ADD Rd{} Rs{} Op{}", rd, rs, operand);
                 let old_rs_value = self.get_register_value(rs);
                 let old_operand_value = self.get_register_value(operand as usize);
 
@@ -293,6 +307,7 @@ impl CPU {
 
             // SUB (operand is register value)
             0b01 => {
+                tracing::debug!("THUMB: SUB Rd{} Rs{} Op{}", rd, rs, operand);
                 let old_rs_value = self.get_register_value(rs);
                 let old_operand_value = self.get_register_value(operand as usize);
 
@@ -317,6 +332,7 @@ impl CPU {
 
                 if operand == 0 {
                     // MOV
+                    tracing::debug!("THUMB: MOV Rd{} Rs{}", rd, rs);
                     let data = self.get_register_value(rs);
                     self.set_register_value(rd, data);
 
@@ -331,6 +347,7 @@ impl CPU {
                     self.set_cpsr_bit(V_FLAG, v_bit);
                 } else {
                     // ADD
+                    tracing::debug!("THUMB: ADD Rd{} Rs{} imm{}", rd, rs, operand);
                     let data = old_rs_value.overflowing_add(operand as u32);
                     self.set_register_value(rd, data.0);
 
@@ -348,6 +365,7 @@ impl CPU {
 
             // SUB (operand is imm)
             0b11 => {
+                tracing::debug!("THUMB: SUB Rd{} Rs{} imm{}", rd, rs, operand);
                 let old_rs_value = self.get_register_value(rs);
 
                 let data = old_rs_value.overflowing_sub(operand as u32);
@@ -377,6 +395,7 @@ impl CPU {
         match opcode {
             // mov
             0b00 => {
+                tracing::debug!("THUMB: MOV Rd{} imm{}", rd, imm);
                 self.set_register_value(rd, imm as u32);
 
                 let n_bit = (((imm as u32) >> 31) & 1) as u8;
@@ -388,6 +407,7 @@ impl CPU {
 
             // cmp
             0b01 => {
+                tracing::debug!("THUMB: CMP Rd{} imm{}", rd, imm);
                 let data = self.get_register_value(rd).overflowing_sub(imm as u32);
 
                 let n_bit = ((data.0 >> 31) & 1) as u8;
@@ -404,6 +424,7 @@ impl CPU {
 
             // add
             0b10 => {
+                tracing::debug!("THUMB: ADD Rd{} imm{}", rd, imm);
                 let old_rd_value = self.get_register_value(rd);
 
                 let data = self.get_register_value(rd).overflowing_add(imm as u32);
@@ -422,6 +443,7 @@ impl CPU {
 
             // sub
             0b11 => {
+                tracing::debug!("THUMB: SUB Rd{} imm{}", rd, imm);
                 let old_rd_value = self.get_register_value(rd);
                 let data = self.get_register_value(rd).overflowing_sub(imm as u32);
                 self.set_register_value(rd, data.0);
@@ -460,6 +482,7 @@ impl CPU {
         match opcode {
             // and
             0x0 => {
+                tracing::debug!("THUMB: AND Rd{} Rs{}", rd, rs);
                 let data = rd_value & rs_value;
                 self.ro_set_nz_flags(data);
                 self.set_register_value(rd, data);
@@ -467,6 +490,7 @@ impl CPU {
 
             // eor
             0x1 => {
+                tracing::debug!("THUMB: EOR Rd{} Rs{}", rd, rs);
                 let data = rd_value ^ rs_value;
                 self.ro_set_nz_flags(data);
                 self.set_register_value(rd, data);
@@ -474,6 +498,7 @@ impl CPU {
 
             // lsl
             0x2 => {
+                tracing::debug!("THUMB: LSL Rd{} Rs{}", rd, rs);
                 let n = rs_value & 0xFF;
                 let data = match n {
                     0 => rd_value,
@@ -496,6 +521,7 @@ impl CPU {
 
             // lsr
             0x3 => {
+                tracing::debug!("THUMB: LSR Rd{} Rs{}", rd, rs);
                 let n = rs_value & 0xFF;
                 let data = match n {
                     0 => rd_value,
@@ -518,6 +544,7 @@ impl CPU {
 
             // asr
             0x4 => {
+                tracing::debug!("THUMB: ASR Rd{} Rs{}", rd, rs);
                 let n = rs_value & 0xFF;
                 let data = match n {
                     0 => rd_value,
@@ -536,6 +563,7 @@ impl CPU {
 
             // adc
             0x5 => {
+                tracing::debug!("THUMB: AND Rd{} Rs{}", rd, rs);
                 let (sum1, c1) = rd_value.overflowing_add(rs_value);
                 let (sum2, c2) = sum1.overflowing_add(self.get_cpsr_bit(C_FLAG) as u32);
                 let c_bit = (c1 || c2) as u8;
@@ -556,6 +584,7 @@ impl CPU {
 
             // sbc
             0x6 => {
+                tracing::debug!("THUMB: SBC Rd{} Rs{}", rd, rs);
                 let borrow = 1 - self.get_cpsr_bit(C_FLAG) as u32;
                 let sub2 = rd_value.wrapping_sub(rs_value).wrapping_sub(borrow);
 
@@ -577,6 +606,7 @@ impl CPU {
 
             // ror
             0x7 => {
+                tracing::debug!("THUMB: ROR Rd{} Rs{}", rd, rs);
                 let n = rs_value & 0xFF;
                 let data = rd_value.rotate_right(n & 31);
                 self.ro_set_nz_flags(data);
@@ -588,12 +618,14 @@ impl CPU {
 
             // tst
             0x8 => {
+                tracing::debug!("THUMB: TST Rd{} Rs{}", rd, rs);
                 let data = rd_value & rs_value;
                 self.ro_set_nz_flags(data);
             }
 
             // neg
             0x9 => {
+                tracing::debug!("THUMB: NEG Rd{} Rs{}", rd, rs);
                 let data = 0u32.overflowing_sub(rs_value);
 
                 let c_bit = !data.1 as u8;
@@ -608,6 +640,7 @@ impl CPU {
 
             // cmp
             0xA => {
+                tracing::debug!("THUMB: CMP Rd{} Rs{}", rd, rs);
                 let data = rd_value.overflowing_sub(rs_value);
 
                 let c_bit = !data.1 as u8;
@@ -620,6 +653,7 @@ impl CPU {
 
             // cmn
             0xB => {
+                tracing::debug!("THUMB: CMN Rd{} Rs{}", rd, rs);
                 let data = rd_value.overflowing_add(rs_value);
 
                 self.ro_set_nz_flags(data.0);
@@ -631,6 +665,7 @@ impl CPU {
 
             // orr
             0xC => {
+                tracing::debug!("THUMB: ORR Rd{} Rs{}", rd, rs);
                 let data = rd_value | rs_value;
                 self.ro_set_nz_flags(data);
                 self.set_register_value(rd, data);
@@ -638,6 +673,7 @@ impl CPU {
 
             // mul
             0xD => {
+                tracing::debug!("THUMB: MUL Rd{} Rs{}", rd, rs);
                 let data = rd_value.overflowing_mul(rs_value).0;
                 self.ro_set_nz_flags(data);
                 self.set_register_value(rd, data);
@@ -647,6 +683,7 @@ impl CPU {
 
             // bic
             0xE => {
+                tracing::debug!("THUMB: BIC Rd{} Rs{}", rd, rs);
                 let data = rd_value & !rs_value;
                 self.ro_set_nz_flags(data);
                 self.set_register_value(rd, data);
@@ -654,6 +691,7 @@ impl CPU {
 
             // mvn
             0xF => {
+                tracing::debug!("THUMB: MVN Rd{} Rs{}", rd, rs);
                 let data = !rs_value;
                 self.ro_set_nz_flags(data);
                 self.set_register_value(rd, data);
@@ -683,6 +721,7 @@ impl CPU {
         match opcode {
             // add
             0b00 => {
+                tracing::debug!("THUMB: ADD Rd{} Rs{}", rd, rs);
                 let data = rd_value.wrapping_add(rs_value);
                 if rd == PC {
                     self.registers.pc = data & !1;
@@ -695,6 +734,7 @@ impl CPU {
 
             // cmp
             0b01 => {
+                tracing::debug!("THUMB: CMP Rd{} Rs{}", rd, rs);
                 let tuple = rd_value.overflowing_sub(rs_value);
                 let data = tuple.0;
 
@@ -713,6 +753,7 @@ impl CPU {
 
             // mov
             0b10 => {
+                tracing::debug!("THUMB: MOV Rd{} Rs{}", rd, rs);
                 if rd == PC {
                     self.registers.pc = rs_value & !1;
                     // clk += 2S + 1N
@@ -724,6 +765,7 @@ impl CPU {
 
             // bx
             0b11 => {
+                tracing::debug!("THUMB: BX Rd{} Rs{}", rd, rs);
                 let target = rs_value;
                 if target & 1 == 0 {
                     // switch to ARM
@@ -749,10 +791,10 @@ impl CPU {
 impl CPU {
     fn ls_execute_pcr(&mut self, memory: &mut GBAMemory, rd: usize, imm: u32) -> u32 {
         let pc_value = (self.registers.pc.wrapping_add(2)) & !2;
-
         let addr = pc_value.wrapping_add(imm);
-        let (data, clk) = memory.read32(addr);
+        tracing::debug!("THUMB: LDR Rd{} [PC + imm:{} = {:08X}]", rd, imm, pc_value);
 
+        let (data, clk) = memory.read32(addr);
         self.set_register_value(rd, data);
 
         // clk += 1S + 1N + 1I
@@ -763,16 +805,17 @@ impl CPU {
         &mut self,
         memory: &mut GBAMemory,
         opcode: u8,
-        offset: usize,
+        ro: usize,
         rb: usize,
         rd: usize,
     ) -> u32 {
-        let offset = self.get_register_value(offset);
+        let offset = self.get_register_value(ro);
 
         let addr = self.get_register_value(rb).wrapping_add(offset);
         match opcode {
             // str
             0b00 => {
+                tracing::debug!("THUMB: STR Rd{} [Rb{} + Ro{} = {:08X}]", rd, rb, ro, addr);
                 let data = self.get_register_value(rd);
 
                 let clk: u32 = memory.write32(addr, data);
@@ -783,6 +826,7 @@ impl CPU {
 
             // strb
             0b01 => {
+                tracing::debug!("THUMB: STRB Rd{} [Rb{} + Ro{} = {:08X}]", rd, rb, ro, addr);
                 let data = self.get_register_value(rd) as u8;
 
                 let clk: u32 = memory.write8(addr, data);
@@ -793,6 +837,7 @@ impl CPU {
 
             // ldr
             0b10 => {
+                tracing::debug!("THUMB: LDR Rd{} [Rb{} + Ro{} = {:08X}]", rd, rb, ro, addr);
                 let (data, clk) = memory.read32(addr);
                 let data = data.rotate_right(8 * (addr & 3));
                 self.set_register_value(rd, data);
@@ -803,6 +848,7 @@ impl CPU {
 
             // ldrb
             0b11 => {
+                tracing::debug!("THUMB: LDRB Rd{} [Rb{} + Ro{} = {:08X}]", rd, rb, ro, addr);
                 let (data, clk) = memory.read8(addr);
 
                 self.set_register_value(rd, data as u32);
@@ -832,6 +878,7 @@ impl CPU {
         match opcode {
             //STRH
             0b00 => {
+                tracing::debug!("THUMB: STRH Rd{} [Rb{} + Ro{} = {:08X}]", rd, rb, ro, addr);
                 let data = self.get_register_value(rd) as u16;
 
                 let clk: u32 = memory.write16(addr, data);
@@ -841,6 +888,7 @@ impl CPU {
 
             // LDSB
             0b01 => {
+                tracing::debug!("THUMB: LDSB Rd{} [Rb{} + Ro{} = {:08X}]", rd, rb, ro, addr);
                 let (read_data, clk) = memory.read8(addr);
                 let data = read_data as i8 as i32 as u32;
 
@@ -851,6 +899,7 @@ impl CPU {
 
             // LDRH
             0b10 => {
+                tracing::debug!("THUMB: LDRH Rd{} [Rb{} + Ro{} = {:08X}]", rd, rb, ro, addr);
                 let (data, clk) = memory.read16(addr);
                 let data = if addr % 2 == 1 {
                     (data as u32).rotate_right(8)
@@ -865,6 +914,7 @@ impl CPU {
 
             // LDSH
             0b11 => {
+                tracing::debug!("THUMB: LDSH Rd{} [Rb{} + Ro{} = {:08X}]", rd, rb, ro, addr);
                 if addr % 2 == 1 {
                     let (read_data, clk) = memory.read8(addr);
                     let data = read_data as i8 as i32 as u32;
@@ -903,6 +953,13 @@ impl CPU {
         match opcode {
             // STR
             0b00 => {
+                tracing::debug!(
+                    "THUMB: STR Rd{} [Rb{} + imm:{} = {:08X}]",
+                    rd,
+                    rb,
+                    imm,
+                    word_addr
+                );
                 let data = self.get_register_value(rd);
 
                 let clk: u32 = memory.write32(word_addr, data);
@@ -913,6 +970,13 @@ impl CPU {
 
             // LDR
             0b01 => {
+                tracing::debug!(
+                    "THUMB: LDR Rd{} [Rb{} + imm:{} = {:08X}]",
+                    rd,
+                    rb,
+                    imm,
+                    word_addr
+                );
                 let (data, clk) = memory.read32(word_addr);
                 let data = data.rotate_right(8 * (word_addr & 3));
 
@@ -924,6 +988,13 @@ impl CPU {
 
             // STRB
             0b10 => {
+                tracing::debug!(
+                    "THUMB: STRB Rd{} [Rb{} + imm:{} = {:08X}]",
+                    rd,
+                    rb,
+                    imm,
+                    byte_addr
+                );
                 let data = self.get_register_value(rd);
 
                 let clk: u32 = memory.write8(byte_addr, data as u8);
@@ -934,6 +1005,13 @@ impl CPU {
 
             // LDRB
             0b11 => {
+                tracing::debug!(
+                    "THUMB: LDRB Rd{} [Rb{} + imm:{} = {:08X}]",
+                    rd,
+                    rb,
+                    imm,
+                    byte_addr
+                );
                 let (data, clk) = memory.read8(byte_addr);
 
                 self.set_register_value(rd, data as u32);
@@ -960,6 +1038,13 @@ impl CPU {
         match opcode {
             // strh
             0 => {
+                tracing::debug!(
+                    "THUMB: STRH Rd{} [Rb{} + imm:{} = {:08X}]",
+                    rd,
+                    rb,
+                    imm,
+                    addr
+                );
                 let data = self.get_register_value(rd) as u16;
 
                 let clk: u32 = memory.write16(addr, data);
@@ -970,6 +1055,13 @@ impl CPU {
 
             // ldrh
             1 => {
+                tracing::debug!(
+                    "THUMB: LDRH Rd{} [Rb{} + imm:{} = {:08X}]",
+                    rd,
+                    rb,
+                    imm,
+                    addr
+                );
                 let (data, clk) = memory.read16(addr);
                 let data = if !addr.is_multiple_of(2) {
                     (data as u32).rotate_right(8)
@@ -994,6 +1086,7 @@ impl CPU {
         match opcode {
             // str
             0 => {
+                tracing::debug!("THUMB: STR Rd{} [SP + imm:{} = {:08X}]", rd, imm, addr);
                 let data = self.get_register_value(rd);
 
                 let clk: u32 = memory.write32(addr, data);
@@ -1004,6 +1097,7 @@ impl CPU {
 
             // ldr
             1 => {
+                tracing::debug!("THUMB: LDR Rd{} [SP + imm:{} = {:08X}]", rd, imm, addr);
                 let (data, clk) = memory.read32(addr);
                 let data = data.rotate_right(8 * (addr & 3));
 
@@ -1026,6 +1120,7 @@ impl CPU {
         match opcode {
             // add rd, pc, imm
             0 => {
+                tracing::debug!("THUMB: ADD Rd{} PC imm{}", rd, imm);
                 let data = ((self.registers.pc + 2) & !2).wrapping_add(imm);
 
                 self.set_register_value(rd, data);
@@ -1033,6 +1128,7 @@ impl CPU {
 
             // add rd, sp, imm
             1 => {
+                tracing::debug!("THUMB: ADD Rd{} SP imm{}", rd, imm);
                 let data = self.get_register_value(SP).wrapping_add(imm);
 
                 self.set_register_value(rd, data);
@@ -1051,10 +1147,16 @@ impl CPU {
 
         let data = match opcode {
             // add sp, imm
-            0 => sp_value.wrapping_add(imm),
+            0 => {
+                tracing::debug!("THUMB: ADD SP imm{}", imm);
+                sp_value.wrapping_add(imm)
+            }
 
             // sub sp, imm
-            1 => sp_value.wrapping_sub(imm),
+            1 => {
+                tracing::debug!("THUMB: ADD SP imm{}", imm);
+                sp_value.wrapping_sub(imm)
+            }
 
             _ => {
                 unreachable!();
@@ -1079,6 +1181,15 @@ impl CPU {
         match opcode {
             // push
             0 => {
+                tracing::debug!(
+                    "THUMB: PUSH rlist:{:?}{}",
+                    rlist,
+                    if pc_lr == 1 {
+                        "LR"
+                    } else {
+                        ""
+                    }
+                );
                 if pc_lr == 1 {
                     rlist.push(LR);
                 }
@@ -1094,6 +1205,15 @@ impl CPU {
             }
             // pop
             1 => {
+                tracing::debug!(
+                    "THUMB: POP rlist:{:?}{}",
+                    rlist,
+                    if pc_lr == 1 {
+                        "LR"
+                    } else {
+                        ""
+                    }
+                );
                 if pc_lr == 1 {
                     rlist.push(PC);
                 }
@@ -1135,6 +1255,7 @@ impl CPU {
         match opcode {
             // stmia
             0 => {
+                tracing::debug!("THUMB: STMIA Rb{} rlist:{:?}", rb, rlist);
                 let init_addr = self.get_register_value(rb);
                 let mut addr = init_addr;
                 let end_base_value = if empty {
@@ -1165,6 +1286,7 @@ impl CPU {
 
             // ldmia
             1 => {
+                tracing::debug!("THUMB: LDMIA Rb{} rlist:{:?}", rb, rlist);
                 let init_addr = self.get_register_value(rb);
                 let mut addr = init_addr;
 
