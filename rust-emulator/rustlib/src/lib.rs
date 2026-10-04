@@ -18,15 +18,17 @@ mod tests {
     use std::collections::{HashSet, VecDeque};
 
     #[test]
-    fn arm_tests() {
+    fn tests() {
         let tests = [
             "/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_DataProcessing.gba",
+            "/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_Any.gba",
+            "/Users/iemi/Downloads/gba-tests/FuzzARM/THUMB_Any.gba",
             "/Users/iemi/Downloads/gba-tests/FuzzARM/THUMB_DataProcessing.gba",
             "/Users/iemi/Downloads/gba-tests/gba-tests/thumb/thumb.gba",
             "/Users/iemi/Downloads/gba-tests/gba-tests/arm/arm.gba",
         ];
 
-        let rom = std::fs::read(tests[3]).expect("ARM test not found");
+        let rom = std::fs::read(tests[1]).expect("ARM test not found");
 
         let mut mem = GBAMemory::new(rom);
         let mut cpu = CPU::new();
@@ -34,7 +36,7 @@ mod tests {
         let mut counter: u32 = 0;
 
         let mut last_few_pc = VecDeque::with_capacity(30);
-        let threshold = 3;
+        let threshold = 4;
         let mut step: usize = 0;
         let window_count = 500;
 

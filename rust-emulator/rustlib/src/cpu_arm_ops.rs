@@ -17,7 +17,7 @@ impl CPU {
 
             // 2S + 1N
         } else {
-            // BX
+            // BL
             self.set_register_value(LR, self.registers.pc);
             self.registers.pc =
                 (self.registers.pc as i32 + 4 + self.b_convert_u24_to_i32(n) * 4) as u32;
@@ -487,8 +487,8 @@ impl CPU {
         match op {
             // MUL
             0b0000 => {
-                if rd == rm || rd == PC as u8 || rs == PC as u8 || rm == PC as u8 {
-                    error!("MUL called with invalid args (Rd is Rm or Arg is PC)");
+                if rd == PC as u8 || rs == PC as u8 || rm == PC as u8 {
+                    error!("MUL called with invalid args (Arg is PC)");
                     return 0;
                 }
                 let data: u32 = rs_value.wrapping_mul(rm_value);
@@ -509,9 +509,8 @@ impl CPU {
 
             // MLA
             0b0001 => {
-                if rd == rm || rn == PC as u8 || rd == PC as u8 || rs == PC as u8 || rm == PC as u8
-                {
-                    error!("MLA called with invalid args (Rd is Rm or Arg is PC)");
+                if rn == PC as u8 || rd == PC as u8 || rs == PC as u8 || rm == PC as u8 {
+                    error!("MLA called with invalid args (Arg is PC)");
                     return 0;
                 }
 
@@ -534,10 +533,8 @@ impl CPU {
 
             // UMULL
             0b0100 => {
-                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rd == rn || rd == rm {
-                    error!(
-                        "UMULL called with invalid args (Rd Rn and Rm may not be the same || may be PC)"
-                    );
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 {
+                    error!("UMULL called with invalid args (arg may not be PC)");
                     return 0;
                 }
 
@@ -562,10 +559,8 @@ impl CPU {
 
             // UMLAL
             0b0101 => {
-                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rd == rn || rd == rm {
-                    error!(
-                        "UMLAL called with invalid args (Rd Rn and Rm may not be the same || may be PC)"
-                    );
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 {
+                    error!("UMLAL called with invalid args (arg may not be PC)");
                     return 0;
                 }
 
@@ -595,10 +590,8 @@ impl CPU {
 
             // SMULL
             0b0110 => {
-                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rd == rn || rd == rm {
-                    error!(
-                        "SMULL called with invalid args (Rd Rn and Rm may not be the same || may be PC)"
-                    );
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 {
+                    error!("SMULL called with invalid args (arg may not be PC)");
                     return 0;
                 }
 
@@ -623,10 +616,8 @@ impl CPU {
 
             // SMLAL
             0b0111 => {
-                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 || rd == rn || rd == rm {
-                    error!(
-                        "SMLAL called with invalid args (Rd Rn and Rm may not be the same || may be PC)"
-                    );
+                if rd == PC as u8 || rn == PC as u8 || rm == PC as u8 {
+                    error!("SMLAL called with invalid args (arg may not be PC)");
 
                     return 0;
                 }
@@ -678,23 +669,23 @@ impl CPU {
         let privileged = self.get_cpu_mode() != CPUMode::User;
 
         if flags == 1 {
-            if privileged {
-                new_psr = (new_psr & !0xF000_0000) | (op & !0xF000_0000);
+            if !privileged {
+                new_psr = (new_psr & !0xF000_0000) | (op & 0xF000_0000);
             } else {
-                new_psr = (new_psr & !0xFF00_0000) | (op & !0xFF00_0000);
+                new_psr = (new_psr & !0xFF00_0000) | (op & 0xFF00_0000);
             }
         }
 
         if status == 1 && privileged {
-            new_psr = (new_psr & !0x00FF_0000) | (op & !0x00FF_0000);
+            new_psr = (new_psr & !0x00FF_0000) | (op & 0x00FF_0000);
         }
 
         if extension == 1 && privileged {
-            new_psr = (new_psr & !0x0000_FF00) | (op & !0x0000_FF00);
+            new_psr = (new_psr & !0x0000_FF00) | (op & 0x0000_FF00);
         }
 
         if control == 1 && privileged {
-            new_psr = (new_psr & !0x0000_00DF) | (op & !0x0000_00DF);
+            new_psr = (new_psr & !0x0000_00DF) | (op & 0x0000_00DF);
         }
 
         new_psr
@@ -881,12 +872,17 @@ impl CPU {
 
             self.set_register_value(rd, data);
 
-            self.set_register_value(rn, (read_addr as i32 + operand as i32) as u32);
+            if rd != rn {
+                self.set_register_value(
+                    rn,
+                    ((read_addr as i32).wrapping_add(operand as i32)) as u32,
+                );
+            }
 
             clk += io_clk;
         } else {
             // pre indexing
-            read_addr = (rn_value as i32 + operand as i32) as u32;
+            read_addr = ((rn_value as i32).wrapping_add(operand as i32)) as u32;
 
             let (data, io_clk) = self.sdt_read_data(memory, read_addr, flags[2]);
             let data = if rd == PC {
@@ -897,7 +893,7 @@ impl CPU {
 
             self.set_register_value(rd, data);
 
-            if flags[3] == 1 {
+            if flags[3] == 1 && rd != rn {
                 self.set_register_value(rn, read_addr);
             }
 
@@ -1039,32 +1035,40 @@ impl CPU {
         let addr = if flags[0] == 0 {
             rn_value
         } else {
-            (rn_value as i32 + offset) as u32
+            (rn_value as i32).wrapping_add(offset) as u32
         };
 
         let (data, io) = if opcode == 0b01 {
             let result = memory.read16(addr);
-            (result.0 as u32, result.1)
+            if !addr.is_multiple_of(2) {
+                ((result.0 as u32).rotate_right(8), result.1)
+            } else {
+                (result.0 as u32, result.1)
+            }
         } else if opcode == 0b10 {
             let result = memory.read8(addr);
             (result.0 as i8 as i32 as u32, result.1)
         } else {
-            let result = memory.read16(addr);
-            (result.0 as i16 as i32 as u32, result.1)
+            if !addr.is_multiple_of(2) {
+                let result = memory.read8(addr);
+                (result.0 as i8 as i32 as u32, result.1)
+            } else {
+                let result = memory.read16(addr);
+                (result.0 as i16 as i32 as u32, result.1)
+            }
         };
 
         clk += io;
 
         self.set_register_value(rd, data);
 
-        if flags[0] == 0 {
-            self.set_register_value(rn, (addr as i32 + offset) as u32);
-        } else {
-            if flags[2] == 1 {
+        if rd != rn {
+            if flags[0] == 0 {
+                self.set_register_value(rn, ((addr as i32).wrapping_add(offset)) as u32);
+            } else if flags[2] == 1 {
                 self.set_register_value(rn, addr);
             }
         }
-
         // clk += (1S + 1N + 1I)
         clk
     }
