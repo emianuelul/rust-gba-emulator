@@ -2,7 +2,7 @@ use crate::constants::*;
 use crate::memory_area::GBAMemory;
 use bitmatch::bitmatch;
 use std::collections::HashMap;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, warn};
 
 // REMINDER: PC IS ADVANCED AFTER FETCH; OPERATIONS USE, BASICALLY, THE OLD PC
 
@@ -53,7 +53,6 @@ pub struct CPU {
     pub registers: CPURegisters,
     pub cpsr: u32,
     pub spsr: HashMap<CPUMode, u32>,
-    debug: bool,
 }
 
 // init
@@ -69,12 +68,7 @@ impl CPU {
                 (CPUMode::Irq, 0),
                 (CPUMode::Undefined, 0),
             ]),
-            debug: false,
         }
-    }
-
-    pub fn enable_debug(&mut self) {
-        self.debug = true;
     }
 }
 

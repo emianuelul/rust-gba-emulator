@@ -2,30 +2,30 @@ pub mod constants;
 pub mod cpu_arm_ops;
 pub mod cpu_module;
 pub mod cpu_thumb_ops;
+pub mod display_registers;
 pub mod gba_emulator;
 pub mod memory_area;
 pub mod ppu_module;
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{cpu_module::CPU, memory_area::GBAMemory};
     use std::collections::{HashSet, VecDeque};
+
+    const LOG: tracing::Level = tracing::Level::DEBUG;
 
     fn init_tracing() {
         let _ = tracing_subscriber::fmt()
             .with_test_writer()
-            .with_max_level(tracing::Level::TRACE)
+            .with_max_level(LOG)
             .try_init();
     }
 
     #[test]
     fn tests() {
         init_tracing();
+
+        let test = 4;
 
         let tests = [
             "/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_DataProcessing.gba",
@@ -36,7 +36,7 @@ mod tests {
             "/Users/iemi/Downloads/gba-tests/gba-tests/arm/arm.gba",
         ];
 
-        let rom = std::fs::read(tests[5]).expect("ARM test not found");
+        let rom = std::fs::read(tests[test]).expect("Test not found");
 
         let mut mem = GBAMemory::new(rom);
         let mut cpu = CPU::new();
@@ -47,7 +47,7 @@ mod tests {
         let mut last_few_pc: VecDeque<u32> = VecDeque::with_capacity(cap);
         let threshold = 10;
         let mut step: usize = 0;
-        let window_count = 2000;
+        let window_count = 50;
 
         loop {
             let _ = cpu.step(&mut mem);
@@ -70,7 +70,7 @@ mod tests {
                         break;
                     }
                 }
-                last_few_pc.pop_front();
+                last_few_pc.clear();
             }
 
             if pc == 0x8001d4c {
@@ -84,15 +84,15 @@ mod tests {
             }
         }
 
-        println!(
-            "Finished after {} steps, landed at PC = {:x}",
-            counter,
-            cpu.get_register_value(15)
-        );
-    }
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+        println!("Finished test \"{}\" after {} steps", tests[test], counter,);
+        let mut freq: HashSet<u32> = HashSet::new();
+        for &i in last_few_pc.iter() {
+            freq.insert(i);
+        }
+
+        println!("Last few PCs");
+        for &i in freq.iter() {
+            println!("PC = {:08X}", i)
+        }
     }
 }

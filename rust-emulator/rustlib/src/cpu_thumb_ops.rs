@@ -133,7 +133,11 @@ impl CPU {
                 let cond = self.check_condition(c as u8);
                 let offset = (((o as i8) as i32) << 1) as u32;
 
-                tracing::debug!("THUMB: Conditional Branch cond:{:01X} offset:{}", c, offset);
+                tracing::debug!(
+                    "THUMB: Conditional Branch cond:{:01X} offset:{:+}",
+                    c,
+                    offset
+                );
                 self.jc_execute_cb(cond, offset);
             }
 
@@ -142,7 +146,7 @@ impl CPU {
                 let offset = (((((n << 5) as i16) >> 5) as i32) << 1) as u32;
                 let dest = self.registers.pc.wrapping_add(2).wrapping_add(offset) & !1;
 
-                tracing::debug!("THUMB: B <PC + offset:{} = {}>", offset, dest);
+                tracing::debug!("THUMB: B <PC + offset:{:+} = {:08X}>", offset, dest);
                 self.registers.pc = dest;
 
                 // clk += 2S + 1N
@@ -152,7 +156,11 @@ impl CPU {
             "11110_nnnnnnnnnnn" => {
                 let imm = ((((n << 5) as i16 as i32) >> 5) << 12) as u32;
                 let data = self.registers.pc.wrapping_add(2).wrapping_add(imm);
-                tracing::debug!("THUMB: Long Branch LR = <PC + offset:{} = {}>", imm, data);
+                tracing::debug!(
+                    "THUMB: Long Branch LR = <PC + offset:{:+} = {:08X}>",
+                    imm,
+                    data
+                );
                 self.set_register_value(LR, data);
 
                 // clk += 1S
