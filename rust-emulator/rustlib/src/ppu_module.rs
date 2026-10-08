@@ -3,16 +3,12 @@ use crate::memory_area::GBAMemory;
 
 pub struct PPU {
     display: GBADisplay,
+    cycles: usize,
 }
 
-// layers: 0123
-// features: Scrolling|Flip|Mosaic|AlphaBlending|Brightness|Priority
 pub struct GBADisplay {
     screen: [[u16; 240]; 160],
-    green_swap: bool,
     rot_scal: bool,
-    layers: (bool, bool, bool, bool),
-    features: (bool, bool, bool, bool, bool, bool),
     tilemap: bool,
 }
 
@@ -20,10 +16,7 @@ impl GBADisplay {
     pub fn new() -> Self {
         GBADisplay {
             screen: [[0; 240]; 160],
-            green_swap: false,
             rot_scal: false,
-            layers: (false, false, false, false),
-            features: (false, false, false, false, false, false),
             tilemap: false,
         }
     }
@@ -34,6 +27,7 @@ impl PPU {
     pub fn new() -> Self {
         PPU {
             display: GBADisplay::new(),
+            cycles: 0,
         }
     }
 }
@@ -48,5 +42,7 @@ impl Default for PPU {
 impl PPU {}
 
 impl PPU {
-    fn step(&mut self, clk: u32, memory: &mut GBAMemory) {}
+    fn step(&mut self, clk: u32, memory: &mut GBAMemory) {
+        self.cycles = self.cycles.wrapping_add(clk as usize);
+    }
 }

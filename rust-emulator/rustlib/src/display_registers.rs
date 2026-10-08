@@ -1,3 +1,5 @@
+use crate::memory_area::GBAMemory;
+
 // PPU Utility functions
 pub fn get_mem_reg16_bit(data: u16, pos: usize) -> u8 {
     ((data >> pos) & 1) as u8
@@ -11,6 +13,30 @@ pub fn get_register_field_value(register: u16, (pos, len): (u8, u8)) -> u8 {
         field_value = (field_value << 1) | bit;
     }
     field_value
+}
+
+pub fn set_register_field_value(
+    memory: &mut GBAMemory,
+    register_addr: u32,
+    register: u16,
+    (pos, len): (u8, u8),
+    value: u16,
+) {
+    let mut result: u16 = register;
+
+    for i in 0..16 {
+        let is_in_range = i >= pos && i < pos + len;
+        if is_in_range {
+            let value_bit = (value >> (i - pos)) & 1;
+            if value_bit == 1 {
+                result |= value_bit << i;
+            } else {
+                result &= !(1 << i);
+            }
+        }
+    }
+
+    memory.write16(register_addr, result);
 }
 
 pub const DISPCNT_ADDR: u32 = 0x04000000;

@@ -25,7 +25,7 @@ mod tests {
     fn tests() {
         init_tracing();
 
-        let test = 4;
+        let test = 5;
 
         let tests = [
             "/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_DataProcessing.gba",
