@@ -5,29 +5,30 @@ pub fn get_mem_reg16_bit(data: u16, pos: usize) -> u8 {
     ((data >> pos) & 1) as u8
 }
 
-pub fn get_register_field_value(register: u16, (pos, len): (u8, u8)) -> u8 {
+pub fn get_register_field_value(memory: &mut GBAMemory, addr: u32, (pos, len): (u8, u8)) -> u16 {
+    let register: u16 = memory.read16(addr).0;
     let mut field_value = 0;
     for i in (0..len).rev() {
         let offset = pos + i;
         let bit = get_mem_reg16_bit(register, offset as usize);
         field_value = (field_value << 1) | bit;
     }
-    field_value
+    field_value as u16
 }
 
 pub fn set_register_field_value(
     memory: &mut GBAMemory,
-    register_addr: u32,
-    register: u16,
+    addr: u32,
     (pos, len): (u8, u8),
     value: u16,
 ) {
+    let register = memory.read16(addr).0;
     let mut result: u16 = register;
 
     for i in 0..16 {
         let is_in_range = i >= pos && i < pos + len;
         if is_in_range {
-            let value_bit = (value >> (i - pos)) & 1;
+            let value_bit = (value >> ((i - pos) % 16)) & 1;
             if value_bit == 1 {
                 result |= value_bit << i;
             } else {
@@ -36,7 +37,7 @@ pub fn set_register_field_value(
         }
     }
 
-    memory.write16(register_addr, result);
+    memory.write16(addr, result);
 }
 
 pub const DISPCNT_ADDR: u32 = 0x04000000;
@@ -107,6 +108,26 @@ pub fn get_dispstat_field(field: DispStatField) -> (u8, u8) {
     }
 }
 
+pub fn dispstat_set_vblank(memory: &mut GBAMemory, value: u16) {
+    let dispstat_field = get_dispstat_field(DispStatField::VBlankFlag);
+    set_register_field_value(memory, DISPSTAT_ADDR, dispstat_field, value);
+}
+
+pub fn dispstat_get_vblank(memory: &mut GBAMemory) -> u16 {
+    let dispstat_field = get_dispstat_field(DispStatField::VBlankFlag);
+    get_register_field_value(memory, DISPSTAT_ADDR, dispstat_field)
+}
+
+pub fn dispstat_set_hblank(memory: &mut GBAMemory, value: u16) {
+    let dispstat_field = get_dispstat_field(DispStatField::HBlankFlag);
+    set_register_field_value(memory, DISPSTAT_ADDR, dispstat_field, value);
+}
+
+pub fn dispstat_get_hblank(memory: &mut GBAMemory) -> u16 {
+    let dispstat_field = get_dispstat_field(DispStatField::HBlankFlag);
+    get_register_field_value(memory, DISPSTAT_ADDR, dispstat_field)
+}
+
 pub const VCOUNT_ADDR: u32 = 0x04000006;
 pub enum VCountField {
     CurrentScanline,
@@ -115,6 +136,22 @@ pub fn get_vcount_field(field: VCountField) -> (u8, u8) {
     match field {
         VCountField::CurrentScanline => (0, 8),
     }
+}
+
+pub fn increment_vcount(memory: &mut GBAMemory) {
+    let vcount_value = memory.read16(VCOUNT_ADDR).0;
+    let vcount_field = get_vcount_field(VCountField::CurrentScanline);
+    set_register_field_value(memory, VCOUNT_ADDR, vcount_field, vcount_value + 1);
+}
+
+pub fn get_vcount(memory: &mut GBAMemory) -> usize {
+    let vcount_field = get_vcount_field(VCountField::CurrentScanline);
+    get_register_field_value(memory, VCOUNT_ADDR, vcount_field) as usize
+}
+
+pub fn set_vcount(memory: &mut GBAMemory, value: u16) {
+    let vcount_field = get_vcount_field(VCountField::CurrentScanline);
+    set_register_field_value(memory, VCOUNT_ADDR, vcount_field, value);
 }
 
 // add x * 2 to obtain correct addr
