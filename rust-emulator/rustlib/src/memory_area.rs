@@ -1,5 +1,7 @@
 use tracing::{error, warn};
 
+use crate::system_ctrl_registers::WAITCNT_ADDR;
+
 struct InternalMemory {
     bios: Vec<u8>, // 16Kb      0x00000000 - 0x00003FFF
     // unused ~32Mb     0x00004000 - 0x01FFFFFF
@@ -34,6 +36,10 @@ pub struct GBAMemory {
     // TODO: use once n/s logic exists
     last_access: u32,
     // unused 0x10000000 - 0xFFFFFFFF
+    pub ns0_wait: (u32, u32),
+    pub ns1_wait: (u32, u32),
+    pub ns2_wait: (u32, u32),
+    pub ns_sram_wait: u32,
 }
 
 // INIT
@@ -67,14 +73,23 @@ impl ExternalMemory {
     }
 }
 
+const TEMP_WAITCNT: u16 = 0x4317;
 impl GBAMemory {
     pub fn new(rom_data: Vec<u8>) -> Self {
-        GBAMemory {
+        let mut returned = GBAMemory {
             internal: InternalMemory::new(),
             display: DisplayMemory::new(),
             external: ExternalMemory::new(rom_data),
             last_access: 0,
-        }
+            ns0_wait: (0, 0),
+            ns1_wait: (0, 0),
+            ns2_wait: (0, 0),
+            ns_sram_wait: 0,
+        };
+
+        returned.write16(WAITCNT_ADDR, TEMP_WAITCNT);
+
+        return returned;
     }
 
     pub fn get_rom_size(&self) -> usize {
@@ -539,6 +554,8 @@ impl InternalMemory {
 
             // EDGECASE
             0x04000000..=0x040003FE => {
+                if addr == 0x04000204 || addr == 0x04000205 {}
+
                 let index = (addr - 0x04000000) as usize;
                 self.io_registers[index] = data;
                 clk = 1;
@@ -844,7 +861,12 @@ impl GBAMemory {
         let mut clk: u32 = 0;
 
         match addr {
-            0x00000000..=0x04FFFFFF => clk = self.internal.write8(addr, data),
+            0x00000000..=0x04FFFFFF => {
+                clk = self.internal.write8(addr, data);
+                if addr == 0x04000204 || addr == 0x04000205 {
+                    self.update_waitcnt_cache();
+                }
+            }
 
             0x05000000..=0x07FFFFFF => clk = self.display.write8(addr, data),
 
