@@ -6,7 +6,7 @@ pub mod display_registers;
 pub mod gba_emulator;
 pub mod memory_area;
 pub mod ppu_module;
-pub mod waitcnt;
+pub mod system_ctrl_registers;
 
 #[cfg(test)]
 mod tests {
