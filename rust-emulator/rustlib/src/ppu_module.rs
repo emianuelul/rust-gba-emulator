@@ -49,12 +49,16 @@ impl Default for PPU {
 impl PPU {}
 
 impl PPU {
+    fn draw_scanline(&mut self, memory: &mut GBAMemory) {}
+}
+
+impl PPU {
     pub fn step(&mut self, memory: &mut GBAMemory, clk: u32) {
         self.cycles += clk as usize;
 
         // Handle HDraw transition to HBlank (past 960 cycles)
         if self.cycles >= HDRAW_CYCLES as usize && dispstat_get_hblank(memory) == 0 {
-            if get_vcount(memory) <= VDRAW_LINES as usize {
+            if get_vcount(memory) < VDRAW_LINES as usize {
                 // draw_scanline()
             }
             dispstat_set_hblank(memory, 1);

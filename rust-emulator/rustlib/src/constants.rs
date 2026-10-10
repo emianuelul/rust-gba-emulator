@@ -14,6 +14,5 @@ pub const T_FLAG: usize = 5;
 pub const SCANLINE_CYCLES: u32 = 1232;
 pub const HDRAW_CYCLES: u32 = 960;
 pub const SCANLINES_PER_FRAME: u32 = 160;
-
 pub const VDRAW_LINES: u32 = 160;
-pub const VBLANK_LINES: u32 = 68;
+pub const VBLANK_LINES: u32 = 228;
