@@ -390,6 +390,7 @@ impl DisplayMemory {
 }
 
 const ROM_MIRROR_TEMP_CLK: u8 = 67;
+const SRAM_TEMP_CLK: u8 = 69;
 
 // TODO: revisit rom memory after waitcnt
 impl ExternalMemory {
@@ -414,7 +415,7 @@ impl ExternalMemory {
                 match self.sram.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = 8;
+                        clk = SRAM_TEMP_CLK as u32;
                     }
                     None => error!("Couldn't read addr {:x?} from GamePak SRAM", addr),
                 }
@@ -440,7 +441,7 @@ impl ExternalMemory {
 
             0x0E000000..=0x0FFFFFFF => {
                 warn!("Reading 16bit value from FLASH memory");
-                clk = 8;
+                clk = SRAM_TEMP_CLK as u32;
             }
 
             _ => {
@@ -463,7 +464,7 @@ impl ExternalMemory {
 
             0x0E000000..=0x0FFFFFFF => {
                 warn!("Reading 32bit value from FLASH memory");
-                clk = 8;
+                clk = SRAM_TEMP_CLK as u32;
             }
 
             _ => {
@@ -490,6 +491,8 @@ impl GBAMemory {
                 data = self.external.read8(addr);
                 if data.1 == ROM_MIRROR_TEMP_CLK as u32 {
                     data.1 = get_rom_mirror_clk(addr, self);
+                } else if data.1 == SRAM_TEMP_CLK as u32 {
+                    data.1 = self.ns_sram_wait;
                 }
             }
 
@@ -516,6 +519,8 @@ impl GBAMemory {
                 data = self.external.read16(addr);
                 if data.1 == ROM_MIRROR_TEMP_CLK as u32 {
                     data.1 = get_rom_mirror_clk(addr, self);
+                } else if data.1 == SRAM_TEMP_CLK as u32 {
+                    data.1 = self.ns_sram_wait;
                 }
             }
 
@@ -542,6 +547,8 @@ impl GBAMemory {
                 data = self.external.read32(addr);
                 if data.1 == ROM_MIRROR_TEMP_CLK as u32 {
                     data.1 = get_rom_mirror_clk(addr, self);
+                } else if data.1 == SRAM_TEMP_CLK as u32 {
+                    data.1 = self.ns_sram_wait;
                 }
             }
 
@@ -817,7 +824,7 @@ impl ExternalMemory {
                 let index = ((addr - 0x0E000000) % self.sram.len() as u32) as usize;
                 self.sram[index] = data;
 
-                clk = 8;
+                clk = SRAM_TEMP_CLK as u32;
             }
 
             _ => {
@@ -839,7 +846,7 @@ impl ExternalMemory {
             }
 
             0x0E000000..=0x0FFFFFFF => {
-                clk = 8;
+                clk = SRAM_TEMP_CLK as u32;
             }
 
             _ => {
@@ -865,7 +872,7 @@ impl ExternalMemory {
             }
 
             0x0E000000..=0x0FFFFFFF => {
-                clk = 8;
+                clk = SRAM_TEMP_CLK as u32;
             }
 
             _ => {
@@ -903,6 +910,8 @@ impl GBAMemory {
 
                 if clk == ROM_MIRROR_TEMP_CLK as u32 {
                     clk = get_rom_mirror_clk(addr, self);
+                } else if clk == SRAM_TEMP_CLK as u32 {
+                    clk = self.ns_sram_wait;
                 }
             }
 
@@ -935,6 +944,8 @@ impl GBAMemory {
                 clk = self.external.write16(addr, data);
                 if clk == ROM_MIRROR_TEMP_CLK as u32 {
                     clk = get_rom_mirror_clk(addr, self);
+                } else if clk == SRAM_TEMP_CLK as u32 {
+                    clk = self.ns_sram_wait;
                 }
             }
 
@@ -967,6 +978,8 @@ impl GBAMemory {
                 clk = self.external.write32(addr, data);
                 if clk == ROM_MIRROR_TEMP_CLK as u32 {
                     clk = get_rom_mirror_clk(addr, self);
+                } else if clk == SRAM_TEMP_CLK as u32 {
+                    clk = self.ns_sram_wait;
                 }
             }
 
