@@ -2,6 +2,25 @@ use tracing::{error, warn};
 
 use crate::system_ctrl_registers::WAITCNT_ADDR;
 
+fn touches_waitcnt(addr: u32, width: u8) -> bool {
+    addr < WAITCNT_ADDR + 2 && WAITCNT_ADDR < addr + width as u32
+}
+
+fn get_rom_mirror_clk(addr: u32, mem: &GBAMemory) -> u32 {
+    let wait = (addr >> 25) & 3;
+    match wait {
+        0 => mem.ns0_wait.0 + mem.ns0_wait.1,
+
+        1 => mem.ns1_wait.0 + mem.ns1_wait.1,
+
+        2 => mem.ns2_wait.0 + mem.ns2_wait.1,
+
+        _ => {
+            unreachable!()
+        }
+    }
+}
+
 struct InternalMemory {
     bios: Vec<u8>, // 16Kb      0x00000000 - 0x00003FFF
     // unused ~32Mb     0x00004000 - 0x01FFFFFF
@@ -73,6 +92,7 @@ impl ExternalMemory {
     }
 }
 
+// TEMPORARY WAITCNT REMOVE AFTER BIOS
 const TEMP_WAITCNT: u16 = 0x4317;
 impl GBAMemory {
     pub fn new(rom_data: Vec<u8>) -> Self {
@@ -89,7 +109,7 @@ impl GBAMemory {
 
         returned.write16(WAITCNT_ADDR, TEMP_WAITCNT);
 
-        return returned;
+        returned
     }
 
     pub fn get_rom_size(&self) -> usize {
@@ -132,7 +152,7 @@ impl InternalMemory {
                 match self.wram_on_board.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = 3; // TODO: COME BACK AFTER WAITCNT
+                        clk = 3;
                     }
                     None => error!("Couldn't read addr {:x?} from On-Board WRAM", addr),
                 }
@@ -150,7 +170,7 @@ impl InternalMemory {
             }
 
             // EDGECASE
-            0x04000000..=0x040003FE => {
+            0x04000000..=0x040003FF => {
                 let index = (addr - 0x04000000) as usize;
                 match self.io_registers.get(index) {
                     Some(&value) => {
@@ -198,7 +218,7 @@ impl InternalMemory {
             }
 
             // io registers
-            0x04000000..=0x040003FE => {
+            0x04000000..=0x040003FF => {
                 clk = 1;
             }
 
@@ -229,7 +249,6 @@ impl InternalMemory {
 
             0x02000000..=0x02FFFFFF => {
                 clk = 6;
-                // TODO: revisit after waitcnt
             }
 
             0x03000000..=0x03FFFFFF => {
@@ -237,7 +256,7 @@ impl InternalMemory {
             }
 
             // EDGECASE
-            0x04000000..=0x040003FE => {
+            0x04000000..=0x040003FF => {
                 clk = 1;
             }
 
@@ -370,6 +389,8 @@ impl DisplayMemory {
     }
 }
 
+const ROM_MIRROR_TEMP_CLK: u8 = 67;
+
 // TODO: revisit rom memory after waitcnt
 impl ExternalMemory {
     fn read8(&self, addr: u32) -> (u8, u32) {
@@ -381,9 +402,8 @@ impl ExternalMemory {
                 let index = ((addr - 0x08000000) % self.rom.len() as u32) as usize;
                 match self.rom.get(index) {
                     Some(&value) => {
-                        // let wait = ((addr - 0x08000000) / self.rom.len() as u32) as usize;
+                        clk = ROM_MIRROR_TEMP_CLK as u32;
                         data = value;
-                        clk = 2;
                     }
                     None => error!("Couldn't read addr {:x?} from GamePak ROM", addr),
                 }
@@ -415,8 +435,7 @@ impl ExternalMemory {
         let mut clk: u32 = 0;
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                // let wait: usize = ((addr - 0x08000000) / self.external.rom.len() as u32) as usize;
-                clk = 3;
+                clk = ROM_MIRROR_TEMP_CLK as u32;
             }
 
             0x0E000000..=0x0FFFFFFF => {
@@ -439,8 +458,7 @@ impl ExternalMemory {
         let mut clk: u32 = 0;
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                // let wait: usize = ((addr - 0x08000000) / self.external.rom.len() as u32) as usize;
-                clk = 3;
+                clk = ROM_MIRROR_TEMP_CLK as u32;
             }
 
             0x0E000000..=0x0FFFFFFF => {
@@ -468,7 +486,12 @@ impl GBAMemory {
 
             0x05000000..=0x07FFFFFF => data = self.display.read8(addr),
 
-            0x08000000..=0x0FFFFFFF => data = self.external.read8(addr),
+            0x08000000..=0x0FFFFFFF => {
+                data = self.external.read8(addr);
+                if data.1 == ROM_MIRROR_TEMP_CLK as u32 {
+                    data.1 = get_rom_mirror_clk(addr, self);
+                }
+            }
 
             _ => error!(
                 "Couldn't read 8bit value from addr {:x?} from anywhere in memory",
@@ -489,7 +512,12 @@ impl GBAMemory {
 
             0x05000000..=0x07FFFFFF => data = self.display.read16(addr),
 
-            0x08000000..=0x0FFFFFFF => data = self.external.read16(addr),
+            0x08000000..=0x0FFFFFFF => {
+                data = self.external.read16(addr);
+                if data.1 == ROM_MIRROR_TEMP_CLK as u32 {
+                    data.1 = get_rom_mirror_clk(addr, self);
+                }
+            }
 
             _ => error!(
                 "Couldn't read 8bit value from addr {:x?} from anywhere in memory",
@@ -510,7 +538,12 @@ impl GBAMemory {
 
             0x05000000..=0x07FFFFFF => data = self.display.read32(addr),
 
-            0x08000000..=0x0FFFFFFF => data = self.external.read32(addr),
+            0x08000000..=0x0FFFFFFF => {
+                data = self.external.read32(addr);
+                if data.1 == ROM_MIRROR_TEMP_CLK as u32 {
+                    data.1 = get_rom_mirror_clk(addr, self);
+                }
+            }
 
             _ => error!(
                 "Couldn't read 8bit value from addr {:x?} from anywhere in memory",
@@ -553,9 +586,7 @@ impl InternalMemory {
             }
 
             // EDGECASE
-            0x04000000..=0x040003FE => {
-                if addr == 0x04000204 || addr == 0x04000205 {}
-
+            0x04000000..=0x040003FF => {
                 let index = (addr - 0x04000000) as usize;
                 self.io_registers[index] = data;
                 clk = 1;
@@ -597,7 +628,7 @@ impl InternalMemory {
             }
 
             // EDGECASE
-            0x04000000..=0x040003FE => {
+            0x04000000..=0x040003FF => {
                 clk = 1;
             }
 
@@ -642,7 +673,7 @@ impl InternalMemory {
             }
 
             // EDGECASE
-            0x04000000..=0x040003FE => {
+            0x04000000..=0x040003FF => {
                 clk = 1;
             }
 
@@ -701,7 +732,7 @@ impl DisplayMemory {
             }
 
             _ => {
-                error!("Couldn't read addr {:x?} from display memory", addr)
+                error!("Couldn't write addr {:x?} from display memory", addr)
             }
         }
         clk
@@ -727,7 +758,7 @@ impl DisplayMemory {
             }
 
             _ => {
-                error!("Couldn't read addr {:x?} from display memory", addr)
+                error!("Couldn't write addr {:x?} from display memory", addr)
             }
         }
 
@@ -758,7 +789,7 @@ impl DisplayMemory {
             }
 
             _ => {
-                error!("Couldn't read addr {:x?} from display memory", addr)
+                error!("Couldn't write addr {:x?} from display memory", addr)
             }
         }
 
@@ -771,7 +802,6 @@ impl DisplayMemory {
     }
 }
 
-// TODO: revisit after waitcnt
 // TODO: handle FLASH vs ROM memory writes
 impl ExternalMemory {
     fn write8(&mut self, addr: u32, data: u8) -> u32 {
@@ -779,9 +809,8 @@ impl ExternalMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                // let wait = ((addr - 0x08000000) / self.rom.len() as u32) as usize;
+                clk = ROM_MIRROR_TEMP_CLK as u32;
                 warn!("Tried to write to ROM memory");
-                clk = 3;
             }
 
             0x0E000000..=0x0FFFFFFF => {
@@ -792,7 +821,7 @@ impl ExternalMemory {
             }
 
             _ => {
-                error!("Couldn't read addr {:x?} from external memory", addr)
+                error!("Couldn't write addr {:x?} from external memory", addr)
             }
         }
 
@@ -804,9 +833,8 @@ impl ExternalMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                // let wait: usize = addr as usize / self.external.rom.len();
+                clk = ROM_MIRROR_TEMP_CLK as u32;
                 warn!("Tried to write 16bit to ROM memory");
-                clk = 3;
                 return clk;
             }
 
@@ -815,7 +843,7 @@ impl ExternalMemory {
             }
 
             _ => {
-                error!("Couldn't read addr {:x?} from external memory", addr)
+                error!("Couldn't write addr {:x?} from external memory", addr)
             }
         }
 
@@ -831,9 +859,8 @@ impl ExternalMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                // let wait: usize = addr as usize / self.external.rom.len();
+                clk = ROM_MIRROR_TEMP_CLK as u32;
                 warn!("Tried to write 32bit value to ROM");
-                clk = 3;
                 return clk;
             }
 
@@ -842,7 +869,7 @@ impl ExternalMemory {
             }
 
             _ => {
-                error!("Couldn't read addr {:x?} from external memory", addr)
+                error!("Couldn't write addr {:x?} from external memory", addr)
             }
         }
 
@@ -863,17 +890,24 @@ impl GBAMemory {
         match addr {
             0x00000000..=0x04FFFFFF => {
                 clk = self.internal.write8(addr, data);
-                if addr == 0x04000204 || addr == 0x04000205 {
+                if touches_waitcnt(addr, 1) {
+                    tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
                 }
             }
 
             0x05000000..=0x07FFFFFF => clk = self.display.write8(addr, data),
 
-            0x08000000..=0x0FFFFFFF => clk = self.external.write8(addr, data),
+            0x08000000..=0x0FFFFFFF => {
+                clk = self.external.write8(addr, data);
+
+                if clk == ROM_MIRROR_TEMP_CLK as u32 {
+                    clk = get_rom_mirror_clk(addr, self);
+                }
+            }
 
             _ => error!(
-                "Couldn't read 8bit value from addr {:x?} from anywhere in memory",
+                "Couldn't write 8bit value from addr {:x?} from anywhere in memory",
                 addr
             ),
         }
@@ -887,14 +921,25 @@ impl GBAMemory {
         let mut clk: u32 = 0;
 
         match addr {
-            0x00000000..=0x04FFFFFF => clk = self.internal.write16(addr, data),
+            0x00000000..=0x04FFFFFF => {
+                clk = self.internal.write16(addr, data);
+                if touches_waitcnt(addr, 2) {
+                    tracing::debug!("WAITCNT UPDATED!");
+                    self.update_waitcnt_cache();
+                }
+            }
 
             0x05000000..=0x07FFFFFF => clk = self.display.write16(addr, data),
 
-            0x08000000..=0x0FFFFFFF => clk = self.external.write16(addr, data),
+            0x08000000..=0x0FFFFFFF => {
+                clk = self.external.write16(addr, data);
+                if clk == ROM_MIRROR_TEMP_CLK as u32 {
+                    clk = get_rom_mirror_clk(addr, self);
+                }
+            }
 
             _ => error!(
-                "Couldn't read 8bit value from addr {:x?} from anywhere in memory",
+                "Couldn't write 16bit value from addr {:x?} from anywhere in memory",
                 addr
             ),
         }
@@ -908,14 +953,25 @@ impl GBAMemory {
         let mut clk: u32 = 0;
 
         match addr {
-            0x00000000..=0x04FFFFFF => clk = self.internal.write32(addr, data),
+            0x00000000..=0x04FFFFFF => {
+                clk = self.internal.write32(addr, data);
+                if touches_waitcnt(addr, 4) {
+                    tracing::debug!("WAITCNT UPDATED!");
+                    self.update_waitcnt_cache();
+                }
+            }
 
             0x05000000..=0x07FFFFFF => clk = self.display.write32(addr, data),
 
-            0x08000000..=0x0FFFFFFF => clk = self.external.write32(addr, data),
+            0x08000000..=0x0FFFFFFF => {
+                clk = self.external.write32(addr, data);
+                if clk == ROM_MIRROR_TEMP_CLK as u32 {
+                    clk = get_rom_mirror_clk(addr, self);
+                }
+            }
 
             _ => error!(
-                "Couldn't read 8bit value from addr {:x?} from anywhere in memory",
+                "Couldn't write 32bit value from addr {:x?} from anywhere in memory",
                 addr
             ),
         }
