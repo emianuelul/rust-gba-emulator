@@ -1,6 +1,6 @@
-use crate::cpu_module::*;
-use crate::memory_area::*;
-use crate::ppu_module::*;
+use crate::cpu::CPU;
+use crate::memory_area::GBAMemory;
+use crate::ppu_module::PPU;
 
 pub struct GBAEngine {
     memory: GBAMemory,

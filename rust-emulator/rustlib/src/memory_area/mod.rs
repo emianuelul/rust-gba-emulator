@@ -1,0 +1,120 @@
+mod reads;
+mod writes;
+
+use crate::system_ctrl_registers::WAITCNT_ADDR;
+use std::cell::Cell;
+
+fn get_rom_mirror_clk(addr: u32, mem: &GBAMemory) -> u32 {
+    let wait = (addr >> 25) & 3;
+    match wait {
+        0 => mem.ns0_wait.0 + mem.ns0_wait.1,
+
+        1 => mem.ns1_wait.0 + mem.ns1_wait.1,
+
+        2 => mem.ns2_wait.0 + mem.ns2_wait.1,
+
+        _ => {
+            unreachable!()
+        }
+    }
+}
+
+struct InternalMemory {
+    bios: Vec<u8>, // 16Kb      0x00000000 - 0x00003FFF
+    // unused ~32Mb     0x00004000 - 0x01FFFFFF
+    wram_on_board: Vec<u8>, // 256Kb     0x02000000 - 0x020FFFF
+    // unused ~15.75Mb  0x02040000 - 0x02FFFFFF
+    wram_on_chip: Vec<u8>, // 32Kb      0x03000000 - 0x03007FFF
+    // unused ~16Mb     0x03008000 - 0x03FFFFFF
+    io_registers: Vec<u8>, // 1024bytes 0x04000000 - 0x040003FE
+                           // unused ~16Mb     0x04000400 - 0x04FFFFFF
+}
+
+struct DisplayMemory {
+    palette_ram: Vec<u8>, // 1Kb       0x05000000 - 0x050003FF
+    // ~16Mb     0x05000400 - 0x05FFFFFF
+    vram: Vec<u8>, // 96Kb      0x06000000 - 0x06017FFF
+    // ~15.9Mb   0x06018000 - 0x06FFFFFF
+    oam: Vec<u8>, // 1Kb       0x07000000 - 0x070003FF
+                  // ~16Mb     0x07000400 - 0x07FFFFFF
+}
+
+struct ExternalMemory {
+    rom: Vec<u8>, // wait0 32Mb      0x08000000 - 0x09FFFFFF mirrored wait1 32Mb           0x0A000000 - 0x0BFFFFFF
+    // mirrored wait2 32Mb           0x0C000000 - 0x0DFFFFFF
+    sram: Vec<u8>, // 64Kb           0x0E000000 - 0x0E00FFFF
+                   // unused ~32Mb   0x0E010000 - 0x0FFFFFFF
+}
+
+pub struct GBAMemory {
+    internal: InternalMemory,
+    display: DisplayMemory,
+    external: ExternalMemory,
+    // TODO: use once n/s logic exists
+    last_access: Cell<u32>,
+    // unused 0x10000000 - 0xFFFFFFFF
+    pub ns0_wait: (u32, u32),
+    pub ns1_wait: (u32, u32),
+    pub ns2_wait: (u32, u32),
+    pub ns_sram_wait: u32,
+}
+
+// INIT
+impl InternalMemory {
+    fn new() -> Self {
+        InternalMemory {
+            bios: [0; 16 * 1024].to_vec(),
+            wram_on_board: [0; 256 * 1024].to_vec(),
+            wram_on_chip: [0; 32 * 1024].to_vec(),
+            io_registers: [0; 1024].to_vec(),
+        }
+    }
+}
+
+impl DisplayMemory {
+    fn new() -> Self {
+        DisplayMemory {
+            palette_ram: [0; 1024].to_vec(),
+            vram: [0; 96 * 1024].to_vec(),
+            oam: [0; 1024].to_vec(),
+        }
+    }
+}
+
+impl ExternalMemory {
+    fn new(rom_data: Vec<u8>) -> Self {
+        ExternalMemory {
+            rom: rom_data,
+            sram: [0; 64 * 1024].to_vec(),
+        }
+    }
+}
+
+const TEMP_WAITCNT: u16 = 0x4317;
+impl GBAMemory {
+    pub fn new(rom_data: Vec<u8>) -> Self {
+        let mut returned = GBAMemory {
+            internal: InternalMemory::new(),
+            display: DisplayMemory::new(),
+            external: ExternalMemory::new(rom_data),
+            last_access: 0.into(),
+            ns0_wait: (0, 0),
+            ns1_wait: (0, 0),
+            ns2_wait: (0, 0),
+            ns_sram_wait: 0,
+        };
+
+        // REMOVE: AFTER BIOS INIT
+        returned.write16(WAITCNT_ADDR, TEMP_WAITCNT);
+
+        returned
+    }
+
+    pub fn get_rom_size(&self) -> usize {
+        self.external.rom.len()
+    }
+
+    pub fn get_rom_end_addr(&self) -> usize {
+        0x08000000 + self.external.rom.len()
+    }
+}

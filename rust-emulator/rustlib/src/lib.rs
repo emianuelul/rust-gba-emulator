@@ -1,16 +1,16 @@
 pub mod constants;
-pub mod cpu_arm_ops;
-pub mod cpu_module;
-pub mod cpu_thumb_ops;
+mod cpu;
 pub mod display_registers;
 pub mod gba_emulator;
-pub mod memory_area;
+mod memory_area;
 pub mod ppu_module;
 pub mod system_ctrl_registers;
+pub mod utility_fns;
 
 #[cfg(test)]
 mod tests {
-    use crate::{cpu_module::CPU, memory_area::GBAMemory};
+    use crate::cpu::CPU;
+    use crate::memory_area::GBAMemory;
     use std::collections::{HashSet, VecDeque};
 
     const LOG: tracing::Level = tracing::Level::DEBUG;

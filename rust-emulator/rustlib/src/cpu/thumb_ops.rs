@@ -1,8 +1,9 @@
 use crate::constants::*;
-use crate::cpu_module::*;
 use crate::memory_area::*;
 use bitmatch::bitmatch;
 use tracing::error;
+
+use super::CPU;
 
 // THUMB Decode, Execute
 impl CPU {

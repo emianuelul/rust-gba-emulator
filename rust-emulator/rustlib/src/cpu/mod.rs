@@ -4,6 +4,9 @@ use bitmatch::bitmatch;
 use std::collections::HashMap;
 use tracing::{error, warn};
 
+mod arm_ops;
+mod thumb_ops;
+
 // REMINDER: PC IS ADVANCED AFTER FETCH; OPERATIONS USE, BASICALLY, THE OLD PC
 
 #[derive(Hash, Eq, PartialEq, Debug)]

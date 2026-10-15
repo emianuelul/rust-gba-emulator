@@ -1,5 +1,5 @@
+use super::{CPUMode, CPU};
 use crate::constants::*;
-use crate::cpu_module::*;
 use crate::memory_area::*;
 use bitmatch::bitmatch;
 use tracing::{error, warn};
