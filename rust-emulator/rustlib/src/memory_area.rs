@@ -570,8 +570,9 @@ impl GBAMemory {
 
 // MEMORY WRITES
 // TODO: revisit on board wram after waitcnt
-impl InternalMemory {
-    fn write8(&mut self, addr: u32, data: u8) -> u32 {
+// INTERNAL MEMORY WRITES
+impl GBAMemory {
+    fn write8_internal(&mut self, addr: u32, data: u8) -> u32 {
         let mut clk: u32 = 0;
         match addr {
             // EDGECASE
@@ -586,21 +587,23 @@ impl InternalMemory {
             }
 
             0x02000000..=0x02FFFFFF => {
-                let index = ((addr - 0x02000000) % self.wram_on_board.len() as u32) as usize;
-                self.wram_on_board[index] = data;
+                let index =
+                    ((addr - 0x02000000) % self.internal.wram_on_board.len() as u32) as usize;
+                self.internal.wram_on_board[index] = data;
                 clk = 3;
             }
 
             0x03000000..=0x03FFFFFF => {
-                let index = ((addr - 0x03000000) % self.wram_on_chip.len() as u32) as usize;
-                self.wram_on_chip[index] = data;
+                let index =
+                    ((addr - 0x03000000) % self.internal.wram_on_chip.len() as u32) as usize;
+                self.internal.wram_on_chip[index] = data;
                 clk = 1;
             }
 
             // EDGECASE
             0x04000000..=0x040003FF => {
                 let index = (addr - 0x04000000) as usize;
-                self.io_registers[index] = data;
+                self.internal.io_registers[index] = data;
                 clk = 1;
             }
 
@@ -617,7 +620,7 @@ impl InternalMemory {
         clk
     }
 
-    fn write16(&mut self, addr: u32, data: u16) -> u32 {
+    fn write16_internal(&mut self, addr: u32, data: u16) -> u32 {
         let mut clk: u32 = 0;
         match addr {
             // EDGECASE
@@ -656,13 +659,13 @@ impl InternalMemory {
         }
 
         let bytes = data.to_le_bytes();
-        let _ = self.write8(addr, bytes[0]);
-        let _ = self.write8(addr + 1, bytes[1]);
+        let _ = self.write8_internal(addr, bytes[0]);
+        let _ = self.write8_internal(addr + 1, bytes[1]);
 
         clk
     }
 
-    fn write32(&mut self, addr: u32, data: u32) -> u32 {
+    fn write32_internal(&mut self, addr: u32, data: u32) -> u32 {
         let mut clk: u32 = 0;
         match addr {
             // EDGECASE
@@ -701,24 +704,25 @@ impl InternalMemory {
         }
 
         let bytes = data.to_le_bytes();
-        let _ = self.write8(addr, bytes[0]);
-        let _ = self.write8(addr + 1, bytes[1]);
-        let _ = self.write8(addr + 2, bytes[2]);
-        let _ = self.write8(addr + 3, bytes[3]);
+        let _ = self.write8_internal(addr, bytes[0]);
+        let _ = self.write8_internal(addr + 1, bytes[1]);
+        let _ = self.write8_internal(addr + 2, bytes[2]);
+        let _ = self.write8_internal(addr + 3, bytes[3]);
 
         clk
     }
 }
 
 // TODO: revisit after ppu (+1 clk if during scanline render)
-impl DisplayMemory {
-    fn write8(&mut self, addr: u32, data: u8) -> u32 {
+// DISPLAY MEMORY WRITES
+impl GBAMemory {
+    fn write8_display(&mut self, addr: u32, data: u8) -> u32 {
         let mut clk: u32 = 0;
 
         match addr {
             0x05000000..=0x05FFFFFF => {
-                let index = ((addr - 0x05000000) % self.palette_ram.len() as u32) as usize;
-                self.palette_ram[index] = data;
+                let index = ((addr - 0x05000000) % self.display.palette_ram.len() as u32) as usize;
+                self.display.palette_ram[index] = data;
 
                 clk = 1;
             }
@@ -731,14 +735,14 @@ impl DisplayMemory {
                     mirrored as usize
                 };
 
-                self.vram[index] = data;
+                self.display.vram[index] = data;
 
                 clk = 1;
             }
 
             0x07000000..=0x07FFFFFF => {
-                let index = ((addr - 0x07000000) % self.oam.len() as u32) as usize;
-                self.oam[index] = data;
+                let index = ((addr - 0x07000000) % self.display.oam.len() as u32) as usize;
+                self.display.oam[index] = data;
 
                 clk = 1;
             }
@@ -750,7 +754,7 @@ impl DisplayMemory {
         clk
     }
 
-    fn write16(&mut self, addr: u32, data: u16) -> u32 {
+    fn write16_display(&mut self, addr: u32, data: u16) -> u32 {
         let mut clk: u32 = 0;
 
         match addr {
@@ -775,13 +779,13 @@ impl DisplayMemory {
         }
 
         let bytes = data.to_le_bytes();
-        let _ = self.write8(addr, bytes[0]);
-        let _ = self.write8(addr + 1, bytes[1]);
+        let _ = self.write8_display(addr, bytes[0]);
+        let _ = self.write8_display(addr + 1, bytes[1]);
 
         clk
     }
 
-    fn write32(&mut self, addr: u32, data: u32) -> u32 {
+    fn write32_display(&mut self, addr: u32, data: u32) -> u32 {
         let mut clk: u32 = 0;
 
         match addr {
@@ -806,17 +810,18 @@ impl DisplayMemory {
         }
 
         let bytes = data.to_le_bytes();
-        let _ = self.write8(addr, bytes[0]);
-        let _ = self.write8(addr + 1, bytes[1]);
-        let _ = self.write8(addr + 2, bytes[2]);
-        let _ = self.write8(addr + 3, bytes[3]);
+        let _ = self.write8_display(addr, bytes[0]);
+        let _ = self.write8_display(addr + 1, bytes[1]);
+        let _ = self.write8_display(addr + 2, bytes[2]);
+        let _ = self.write8_display(addr + 3, bytes[3]);
         clk
     }
 }
 
 // TODO: handle FLASH vs ROM memory writes
-impl ExternalMemory {
-    fn write8(&mut self, addr: u32, data: u8) -> u32 {
+// EXTERNAL MEMORY WRITES
+impl GBAMemory {
+    fn write8_external(&mut self, addr: u32, data: u8) -> u32 {
         let mut clk: u32 = 0;
 
         match addr {
@@ -826,8 +831,8 @@ impl ExternalMemory {
             }
 
             0x0E000000..=0x0FFFFFFF => {
-                let index = ((addr - 0x0E000000) % self.sram.len() as u32) as usize;
-                self.sram[index] = data;
+                let index = ((addr - 0x0E000000) % self.external.sram.len() as u32) as usize;
+                self.external.sram[index] = data;
 
                 clk = SRAM_TEMP_CLK as u32;
             }
@@ -840,7 +845,7 @@ impl ExternalMemory {
         clk
     }
 
-    fn write16(&mut self, addr: u32, data: u16) -> u32 {
+    fn write16_external(&mut self, addr: u32, data: u16) -> u32 {
         let mut clk: u32 = 0;
 
         match addr {
@@ -860,13 +865,13 @@ impl ExternalMemory {
         }
 
         let bytes = data.to_le_bytes();
-        let _ = self.write8(addr, bytes[0]);
-        let _ = self.write8(addr + 1, bytes[1]);
+        let _ = self.write8_external(addr, bytes[0]);
+        let _ = self.write8_external(addr + 1, bytes[1]);
 
         clk
     }
 
-    fn write32(&mut self, addr: u32, data: u32) -> u32 {
+    fn write32_external(&mut self, addr: u32, data: u32) -> u32 {
         let mut clk: u32 = 0;
 
         match addr {
@@ -886,10 +891,10 @@ impl ExternalMemory {
         }
 
         let bytes = data.to_le_bytes();
-        self.write8(addr, bytes[0]);
-        self.write8(addr + 1, bytes[1]);
-        self.write8(addr + 2, bytes[2]);
-        self.write8(addr + 3, bytes[3]);
+        self.write8_external(addr, bytes[0]);
+        self.write8_external(addr + 1, bytes[1]);
+        self.write8_external(addr + 2, bytes[2]);
+        self.write8_external(addr + 3, bytes[3]);
 
         clk
     }
@@ -901,17 +906,17 @@ impl GBAMemory {
 
         match addr {
             0x00000000..=0x04FFFFFF => {
-                clk = self.internal.write8(addr, data);
+                clk = self.write8_internal(addr, data);
                 if touches_waitcnt(addr, 1) {
                     tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
                 }
             }
 
-            0x05000000..=0x07FFFFFF => clk = self.display.write8(addr, data),
+            0x05000000..=0x07FFFFFF => clk = self.write8_display(addr, data),
 
             0x08000000..=0x0FFFFFFF => {
-                clk = self.external.write8(addr, data);
+                clk = self.write8_external(addr, data);
 
                 if clk == ROM_MIRROR_TEMP_CLK as u32 {
                     clk = get_rom_mirror_clk(addr, self);
@@ -936,17 +941,17 @@ impl GBAMemory {
 
         match addr {
             0x00000000..=0x04FFFFFF => {
-                clk = self.internal.write16(addr, data);
+                clk = self.write16_internal(addr, data);
                 if touches_waitcnt(addr, 2) {
                     tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
                 }
             }
 
-            0x05000000..=0x07FFFFFF => clk = self.display.write16(addr, data),
+            0x05000000..=0x07FFFFFF => clk = self.write16_display(addr, data),
 
             0x08000000..=0x0FFFFFFF => {
-                clk = self.external.write16(addr, data);
+                clk = self.write16_external(addr, data);
                 if clk == ROM_MIRROR_TEMP_CLK as u32 {
                     clk = get_rom_mirror_clk(addr, self);
                 } else if clk == SRAM_TEMP_CLK as u32 {
@@ -970,17 +975,17 @@ impl GBAMemory {
 
         match addr {
             0x00000000..=0x04FFFFFF => {
-                clk = self.internal.write32(addr, data);
+                clk = self.write32_internal(addr, data);
                 if touches_waitcnt(addr, 4) {
                     tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
                 }
             }
 
-            0x05000000..=0x07FFFFFF => clk = self.display.write32(addr, data),
+            0x05000000..=0x07FFFFFF => clk = self.write32_display(addr, data),
 
             0x08000000..=0x0FFFFFFF => {
-                clk = self.external.write32(addr, data);
+                clk = self.write32_external(addr, data);
                 if clk == ROM_MIRROR_TEMP_CLK as u32 {
                     clk = get_rom_mirror_clk(addr, self);
                 } else if clk == SRAM_TEMP_CLK as u32 {
