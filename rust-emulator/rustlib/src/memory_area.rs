@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use tracing::{error, warn};
 
 use crate::system_ctrl_registers::WAITCNT_ADDR;
@@ -53,7 +54,7 @@ pub struct GBAMemory {
     display: DisplayMemory,
     external: ExternalMemory,
     // TODO: use once n/s logic exists
-    last_access: u32,
+    last_access: Cell<u32>,
     // unused 0x10000000 - 0xFFFFFFFF
     pub ns0_wait: (u32, u32),
     pub ns1_wait: (u32, u32),
@@ -100,13 +101,14 @@ impl GBAMemory {
             internal: InternalMemory::new(),
             display: DisplayMemory::new(),
             external: ExternalMemory::new(rom_data),
-            last_access: 0,
+            last_access: 0.into(),
             ns0_wait: (0, 0),
             ns1_wait: (0, 0),
             ns2_wait: (0, 0),
             ns_sram_wait: 0,
         };
 
+        // REMOVE: AFTER BIOS INIT
         returned.write16(WAITCNT_ADDR, TEMP_WAITCNT);
 
         returned
@@ -129,16 +131,16 @@ fn align32(addr: u32) -> u32 {
     addr & !3u32
 }
 
-// MEMORY READS
-impl InternalMemory {
-    fn read8(&self, addr: u32) -> (u8, u32) {
+// INTERNAL MEMORY READS
+impl GBAMemory {
+    fn read8_internal(&self, addr: u32) -> (u8, u32) {
         let mut data: u8 = 0;
         let mut clk: u32 = 0;
         match addr {
             // EDGECASE
             0x00000000..=0x00003FFF => {
                 let index = addr as usize;
-                match self.bios.get(index) {
+                match self.internal.bios.get(index) {
                     Some(&value) => {
                         data = value;
                         clk = 1;
@@ -148,8 +150,9 @@ impl InternalMemory {
             }
 
             0x02000000..=0x02FFFFFF => {
-                let index = ((addr - 0x02000000) % self.wram_on_board.len() as u32) as usize;
-                match self.wram_on_board.get(index) {
+                let index =
+                    ((addr - 0x02000000) % self.internal.wram_on_board.len() as u32) as usize;
+                match self.internal.wram_on_board.get(index) {
                     Some(&value) => {
                         data = value;
                         clk = 3;
@@ -159,8 +162,9 @@ impl InternalMemory {
             }
 
             0x03000000..=0x03FFFFFF => {
-                let index = ((addr - 0x03000000) % self.wram_on_chip.len() as u32) as usize;
-                match self.wram_on_chip.get(index) {
+                let index =
+                    ((addr - 0x03000000) % self.internal.wram_on_chip.len() as u32) as usize;
+                match self.internal.wram_on_chip.get(index) {
                     Some(&value) => {
                         data = value;
                         clk = 1;
@@ -172,7 +176,7 @@ impl InternalMemory {
             // EDGECASE
             0x04000000..=0x040003FF => {
                 let index = (addr - 0x04000000) as usize;
-                match self.io_registers.get(index) {
+                match self.internal.io_registers.get(index) {
                     Some(&value) => {
                         data = value;
                         clk = 1;
@@ -195,9 +199,9 @@ impl InternalMemory {
         (data, clk)
     }
 
-    fn read16(&self, addr: u32) -> (u16, u32) {
-        let first = self.read8(addr).0 as u16;
-        let second = self.read8(addr + 1).0 as u16;
+    fn read16_internal(&self, addr: u32) -> (u16, u32) {
+        let first = self.read8_internal(addr).0 as u16;
+        let second = self.read8_internal(addr + 1).0 as u16;
 
         let mut clk: u32 = 0;
         match addr {
@@ -236,9 +240,9 @@ impl InternalMemory {
         (first | (second << 8), clk)
     }
 
-    fn read32(&self, addr: u32) -> (u32, u32) {
-        let first = self.read16(addr).0 as u32;
-        let second = self.read16(addr + 2).0 as u32;
+    fn read32_internal(&self, addr: u32) -> (u32, u32) {
+        let first = self.read16_internal(addr).0 as u32;
+        let second = self.read16_internal(addr + 2).0 as u32;
 
         let mut clk: u32 = 0;
         match addr {
@@ -276,15 +280,16 @@ impl InternalMemory {
 }
 
 // TODO: revisit after ppu (+1 clk if memory is accessed during rendering)
-impl DisplayMemory {
-    fn read8(&self, addr: u32) -> (u8, u32) {
+// DISPLAY MEMORY READS
+impl GBAMemory {
+    fn read8_display(&self, addr: u32) -> (u8, u32) {
         let mut data: u8 = 0;
         let mut clk: u32 = 0;
 
         match addr {
             0x05000000..=0x05FFFFFF => {
-                let index = ((addr - 0x05000000) % self.palette_ram.len() as u32) as usize;
-                match self.palette_ram.get(index) {
+                let index = ((addr - 0x05000000) % self.display.palette_ram.len() as u32) as usize;
+                match self.display.palette_ram.get(index) {
                     Some(&value) => {
                         data = value;
                         clk = 1;
@@ -303,7 +308,7 @@ impl DisplayMemory {
                     mirrored as usize
                 };
 
-                match self.vram.get(index) {
+                match self.display.vram.get(index) {
                     Some(&value) => {
                         data = value;
                         clk = 1;
@@ -313,8 +318,8 @@ impl DisplayMemory {
             }
 
             0x07000000..=0x07FFFFFF => {
-                let index = ((addr - 0x07000000) % self.oam.len() as u32) as usize;
-                match self.oam.get(index) {
+                let index = ((addr - 0x07000000) % self.display.oam.len() as u32) as usize;
+                match self.display.oam.get(index) {
                     Some(&value) => {
                         data = value;
                         clk = 1;
@@ -330,9 +335,9 @@ impl DisplayMemory {
         (data, clk)
     }
 
-    fn read16(&self, addr: u32) -> (u16, u32) {
-        let first = self.read8(addr).0 as u16;
-        let second = self.read8(addr + 1).0 as u16;
+    fn read16_display(&self, addr: u32) -> (u16, u32) {
+        let first = self.read8_display(addr).0 as u16;
+        let second = self.read8_display(addr + 1).0 as u16;
 
         let mut clk: u32 = 0;
         match addr {
@@ -359,9 +364,9 @@ impl DisplayMemory {
         (first | (second << 8), clk)
     }
 
-    fn read32(&self, addr: u32) -> (u32, u32) {
-        let first = self.read16(addr).0 as u32;
-        let second = self.read16(addr + 2).0 as u32;
+    fn read32_display(&self, addr: u32) -> (u32, u32) {
+        let first = self.read16_display(addr).0 as u32;
+        let second = self.read16_display(addr + 2).0 as u32;
 
         let mut clk: u32 = 0;
         match addr {
@@ -393,15 +398,16 @@ const ROM_MIRROR_TEMP_CLK: u8 = 67;
 const SRAM_TEMP_CLK: u8 = 69;
 
 // TODO: revisit rom memory after waitcnt
-impl ExternalMemory {
-    fn read8(&self, addr: u32) -> (u8, u32) {
+// EXTERNAL MEMORY READS
+impl GBAMemory {
+    fn read8_external(&self, addr: u32) -> (u8, u32) {
         let mut data: u8 = 0;
         let mut clk: u32 = 0;
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                let index = ((addr - 0x08000000) % self.rom.len() as u32) as usize;
-                match self.rom.get(index) {
+                let index = ((addr - 0x08000000) % self.external.rom.len() as u32) as usize;
+                match self.external.rom.get(index) {
                     Some(&value) => {
                         clk = ROM_MIRROR_TEMP_CLK as u32;
                         data = value;
@@ -411,8 +417,8 @@ impl ExternalMemory {
             }
 
             0x0E000000..=0x0FFFFFFF => {
-                let index = ((addr - 0x0E000000) % self.sram.len() as u32) as usize;
-                match self.sram.get(index) {
+                let index = ((addr - 0x0E000000) % self.external.sram.len() as u32) as usize;
+                match self.external.sram.get(index) {
                     Some(&value) => {
                         data = value;
                         clk = SRAM_TEMP_CLK as u32;
@@ -429,9 +435,9 @@ impl ExternalMemory {
         (data, clk)
     }
 
-    fn read16(&self, addr: u32) -> (u16, u32) {
-        let first = self.read8(addr).0 as u16;
-        let second = self.read8(addr + 1).0 as u16;
+    fn read16_external(&self, addr: u32) -> (u16, u32) {
+        let first = self.read8_external(addr).0 as u16;
+        let second = self.read8_external(addr + 1).0 as u16;
 
         let mut clk: u32 = 0;
         match addr {
@@ -452,9 +458,9 @@ impl ExternalMemory {
         (first | (second << 8), clk)
     }
 
-    fn read32(&self, addr: u32) -> (u32, u32) {
-        let first = self.read16(addr).0 as u32;
-        let second = self.read16(addr + 2).0 as u32;
+    fn read32_external(&self, addr: u32) -> (u32, u32) {
+        let first = self.read16_external(addr).0 as u32;
+        let second = self.read16_external(addr + 2).0 as u32;
 
         let mut clk: u32 = 0;
         match addr {
@@ -476,19 +482,19 @@ impl ExternalMemory {
     }
 }
 
+// GBAMEMORY READS
 impl GBAMemory {
     // TODO: UNUSED MEMORY READ/WRITE SPECIAL CASE FUNCTION
-
     pub fn read8(&self, addr: u32) -> (u8, u32) {
         let mut data: (u8, u32) = (0, 0);
 
         match addr {
-            0x00000000..=0x04FFFFFF => data = self.internal.read8(addr),
+            0x00000000..=0x04FFFFFF => data = self.read8_internal(addr),
 
-            0x05000000..=0x07FFFFFF => data = self.display.read8(addr),
+            0x05000000..=0x07FFFFFF => data = self.read8_display(addr),
 
             0x08000000..=0x0FFFFFFF => {
-                data = self.external.read8(addr);
+                data = self.read8_external(addr);
                 if data.1 == ROM_MIRROR_TEMP_CLK as u32 {
                     data.1 = get_rom_mirror_clk(addr, self);
                 } else if data.1 == SRAM_TEMP_CLK as u32 {
@@ -511,12 +517,12 @@ impl GBAMemory {
         let mut data: (u16, u32) = (0, 0);
 
         match addr {
-            0x00000000..=0x04FFFFFF => data = self.internal.read16(addr),
+            0x00000000..=0x04FFFFFF => data = self.read16_internal(addr),
 
-            0x05000000..=0x07FFFFFF => data = self.display.read16(addr),
+            0x05000000..=0x07FFFFFF => data = self.read16_display(addr),
 
             0x08000000..=0x0FFFFFFF => {
-                data = self.external.read16(addr);
+                data = self.read16_external(addr);
                 if data.1 == ROM_MIRROR_TEMP_CLK as u32 {
                     data.1 = get_rom_mirror_clk(addr, self);
                 } else if data.1 == SRAM_TEMP_CLK as u32 {
@@ -539,12 +545,12 @@ impl GBAMemory {
         let mut data: (u32, u32) = (0, 0);
 
         match addr {
-            0x00000000..=0x04FFFFFF => data = self.internal.read32(addr),
+            0x00000000..=0x04FFFFFF => data = self.read32_internal(addr),
 
-            0x05000000..=0x07FFFFFF => data = self.display.read32(addr),
+            0x05000000..=0x07FFFFFF => data = self.read32_display(addr),
 
             0x08000000..=0x0FFFFFFF => {
-                data = self.external.read32(addr);
+                data = self.read32_external(addr);
                 if data.1 == ROM_MIRROR_TEMP_CLK as u32 {
                     data.1 = get_rom_mirror_clk(addr, self);
                 } else if data.1 == SRAM_TEMP_CLK as u32 {
@@ -563,7 +569,6 @@ impl GBAMemory {
 }
 
 // MEMORY WRITES
-
 // TODO: revisit on board wram after waitcnt
 impl InternalMemory {
     fn write8(&mut self, addr: u32, data: u8) -> u32 {
