@@ -1,4 +1,7 @@
-use crate::{display_registers::get_register16_field_value, memory_area::GBAMemory};
+use crate::{
+    display_registers::{get_register16_field_value, get_register32_field_value},
+    memory_area::GBAMemory,
+};
 
 pub const WAITCNT_ADDR: u32 = 0x04000204;
 
@@ -54,7 +57,7 @@ impl GBAMemory {
         }
 
         let ewram_wait = (15 - imc.waitcnt_ewram) + 1;
-        self.ewram_wait = ewram_wait as u32;
+        self.cache.ewram_wait = ewram_wait as u32;
     }
 
     pub fn update_waitcnt_cache(&mut self) {
@@ -83,10 +86,10 @@ impl GBAMemory {
 
         let sram_wait = N_WAIT_TIMES[waitcnt.sram_wait as usize];
 
-        self.ns0_wait = (n0, s0);
-        self.ns1_wait = (n1, s1);
-        self.ns2_wait = (n2, s2);
-        self.sram_wait = sram_wait;
+        self.cache.ns0_wait = (n0 + 1, s0 + 1);
+        self.cache.ns1_wait = (n1 + 1, s1 + 1);
+        self.cache.ns2_wait = (n2 + 1, s2 + 1);
+        self.cache.sram_wait = sram_wait + 1;
     }
 
     pub fn get_waitcnt(&self) -> WAITCNT {
@@ -118,13 +121,13 @@ impl GBAMemory {
     }
 
     pub fn get_imc(&self) -> InternalMemCnt {
-        let register = self.read16(IMC_ADDR).0;
+        let register = self.read32(IMC_ADDR).0;
 
-        let disable_ie_wram = get_register16_field_value(register, IMC_DISABLE_IE_WRAM) == 1;
+        let disable_ie_wram = get_register32_field_value(register, IMC_DISABLE_IE_WRAM) == 1;
         let disable_cgb_bootrom =
-            get_register16_field_value(register, IMC_DISABLE_CGB_BOOTROM) == 1;
-        let enable_ewram = get_register16_field_value(register, IMC_ENABLE_WRAM) == 1;
-        let waitcnt_ewram = get_register16_field_value(register, IMC_WAITCNT_EWRAM) as u8;
+            get_register32_field_value(register, IMC_DISABLE_CGB_BOOTROM) == 1;
+        let enable_ewram = get_register32_field_value(register, IMC_ENABLE_WRAM) == 1;
+        let waitcnt_ewram = get_register32_field_value(register, IMC_WAITCNT_EWRAM) as u8;
 
         InternalMemCnt {
             disable_ie_wram,

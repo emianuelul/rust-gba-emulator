@@ -1,6 +1,6 @@
 use super::GBAMemory;
-use crate::system_ctrl_registers::{IMC_ADDR, WAITCNT_ADDR};
-use crate::utility_fns::{align16, align32, get_rom_mirror_clk, touches_addr};
+use crate::system_ctrl_registers::WAITCNT_ADDR;
+use crate::utility_fns::{align16, align32, get_rom_mirror_clk, is_imc, touches_addr};
 use tracing::{error, warn};
 
 // TODO: revisit on board wram after waitcnt
@@ -21,10 +21,19 @@ impl GBAMemory {
             }
 
             0x02000000..=0x02FFFFFF => {
-                let index =
-                    ((addr - 0x02000000) % self.internal.wram_on_board.len() as u32) as usize;
-                self.internal.wram_on_board[index] = data;
-                clk = 3;
+                if self.cache.use_ewram {
+                    let index =
+                        ((addr - 0x02000000) % self.internal.wram_on_board.len() as u32) as usize;
+
+                    self.internal.wram_on_board[index] = data;
+                    clk = self.cache.ewram_wait;
+                } else {
+                    let index =
+                        ((addr - 0x02000000) % self.internal.wram_on_chip.len() as u32) as usize;
+
+                    self.internal.wram_on_chip[index] = data;
+                    clk = 1;
+                }
             }
 
             0x03000000..=0x03FFFFFF => {
@@ -39,6 +48,13 @@ impl GBAMemory {
                 let index = (addr - 0x04000000) as usize;
                 self.internal.io_registers[index] = data;
                 clk = 1;
+            }
+
+            // EWRAM
+            x if is_imc(x) => {
+                let index = (addr & 0x3) as usize;
+                self.internal.imc[index] = data;
+                clk = self.cache.ewram_wait;
             }
 
             // Unused Mem Areas
@@ -69,7 +85,7 @@ impl GBAMemory {
             }
 
             0x02000000..=0x02FFFFFF => {
-                clk = 3;
+                clk = self.cache.ewram_wait;
             }
 
             0x03000000..=0x03FFFFFF => {
@@ -79,6 +95,10 @@ impl GBAMemory {
             // EDGECASE
             0x04000000..=0x040003FF => {
                 clk = 1;
+            }
+
+            x if is_imc(x) => {
+                clk = self.cache.ewram_wait;
             }
 
             // Unused Mem Areas
@@ -114,7 +134,7 @@ impl GBAMemory {
             }
 
             0x02000000..=0x02FFFFFF => {
-                clk = 6;
+                clk = self.cache.ewram_wait * 2;
             }
 
             0x03000000..=0x03FFFFFF => {
@@ -124,6 +144,10 @@ impl GBAMemory {
             // EDGECASE
             0x04000000..=0x040003FF => {
                 clk = 1;
+            }
+
+            x if is_imc(x) => {
+                clk = self.cache.ewram_wait * 2;
             }
 
             // Unused Mem Areas
@@ -268,7 +292,7 @@ impl GBAMemory {
                 let index = ((addr - 0x0E000000) % self.external.sram.len() as u32) as usize;
                 self.external.sram[index] = data;
 
-                clk = self.sram_wait;
+                clk = self.cache.sram_wait;
             }
 
             _ => {
@@ -290,7 +314,7 @@ impl GBAMemory {
             }
 
             0x0E000000..=0x0FFFFFFF => {
-                clk = self.sram_wait;
+                clk = self.cache.sram_wait;
             }
 
             _ => {
@@ -315,7 +339,7 @@ impl GBAMemory {
                 return clk;
             }
 
-            0x0E000000..=0x0FFFFFFF => clk = self.sram_wait,
+            0x0E000000..=0x0FFFFFFF => clk = self.cache.sram_wait,
 
             _ => {
                 error!("Couldn't write addr {:x?} from external memory", addr)
@@ -342,7 +366,7 @@ impl GBAMemory {
                 if touches_addr(WAITCNT_ADDR, addr, 1) {
                     tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
-                } else if touches_addr(IMC_ADDR, addr, 1) {
+                } else if is_imc(addr) {
                     self.update_imc_cache();
                 }
             }
@@ -374,7 +398,7 @@ impl GBAMemory {
                 if touches_addr(WAITCNT_ADDR, addr, 2) {
                     tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
-                } else if touches_addr(IMC_ADDR, addr, 2) {
+                } else if is_imc(addr) {
                     self.update_imc_cache();
                 }
             }
@@ -406,7 +430,7 @@ impl GBAMemory {
                 if touches_addr(WAITCNT_ADDR, addr, 4) {
                     tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
-                } else if touches_addr(IMC_ADDR, addr, 4) {
+                } else if is_imc(addr) {
                     self.update_imc_cache();
                 }
             }

@@ -12,7 +12,8 @@ struct InternalMemory {
     wram_on_chip: Vec<u8>, // 32Kb      0x03000000 - 0x03007FFF
     // unused ~16Mb     0x03008000 - 0x03FFFFFF
     io_registers: Vec<u8>, // 1024bytes 0x04000000 - 0x040003FE
-                           // unused ~16Mb     0x04000400 - 0x04FFFFFF
+    // unused ~16Mb     0x04000400 - 0x04FFFFFF
+    imc: Vec<u8>,
 }
 
 struct DisplayMemory {
@@ -31,16 +32,21 @@ struct ExternalMemory {
                    // unused ~32Mb   0x0E010000 - 0x0FFFFFFF
 }
 
-pub struct GBAMemory {
-    internal: InternalMemory,
-    display: DisplayMemory,
-    external: ExternalMemory,
-    last_access: Cell<(u32, u8)>,
+pub struct Cache {
     pub ns0_wait: (u32, u32),
     pub ns1_wait: (u32, u32),
     pub ns2_wait: (u32, u32),
     pub sram_wait: u32,
+    pub use_ewram: bool,
     pub ewram_wait: u32,
+}
+
+pub struct GBAMemory {
+    last_access: Cell<(u32, u8)>,
+    internal: InternalMemory,
+    display: DisplayMemory,
+    external: ExternalMemory,
+    pub cache: Cache,
 }
 
 // INIT
@@ -51,6 +57,7 @@ impl InternalMemory {
             wram_on_board: [0; 256 * 1024].to_vec(),
             wram_on_chip: [0; 32 * 1024].to_vec(),
             io_registers: [0; 1024].to_vec(),
+            imc: [0; 4].to_vec(),
         }
     }
 }
@@ -74,20 +81,29 @@ impl ExternalMemory {
     }
 }
 
-const TEMP_WAITCNT: u16 = 0x4317;
-const TEMP_IMC: u32 = 0x0D000020;
-impl GBAMemory {
-    pub fn new(rom_data: Vec<u8>) -> Self {
-        let mut returned = GBAMemory {
-            internal: InternalMemory::new(),
-            display: DisplayMemory::new(),
-            external: ExternalMemory::new(rom_data),
-            last_access: (0, 0).into(),
+impl Cache {
+    fn new() -> Self {
+        Cache {
             ns0_wait: (0, 0),
             ns1_wait: (0, 0),
             ns2_wait: (0, 0),
             sram_wait: 0,
             ewram_wait: 0,
+            use_ewram: false,
+        }
+    }
+}
+
+const TEMP_WAITCNT: u16 = 0x4317;
+const TEMP_IMC: u32 = 0x0D000020;
+impl GBAMemory {
+    pub fn new(rom_data: Vec<u8>) -> Self {
+        let mut returned = GBAMemory {
+            last_access: (0, 0).into(),
+            internal: InternalMemory::new(),
+            display: DisplayMemory::new(),
+            external: ExternalMemory::new(rom_data),
+            cache: Cache::new(),
         };
 
         // REMOVE: AFTER BIOS INIT

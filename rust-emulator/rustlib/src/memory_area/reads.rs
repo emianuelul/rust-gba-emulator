@@ -1,5 +1,5 @@
 use super::GBAMemory;
-use crate::utility_fns::{align16, align32, get_rom_mirror_clk};
+use crate::utility_fns::{align16, align32, get_rom_mirror_clk, is_imc};
 use tracing::{error, warn};
 
 // INTERNAL MEMORY READS
@@ -21,14 +21,27 @@ impl GBAMemory {
             }
 
             0x02000000..=0x02FFFFFF => {
-                let index =
-                    ((addr - 0x02000000) % self.internal.wram_on_board.len() as u32) as usize;
-                match self.internal.wram_on_board.get(index) {
-                    Some(&value) => {
-                        data = value;
-                        clk = 3;
+                if self.cache.use_ewram {
+                    let index =
+                        ((addr - 0x02000000) % self.internal.wram_on_board.len() as u32) as usize;
+                    match self.internal.wram_on_board.get(index) {
+                        Some(&value) => {
+                            data = value;
+                            clk = self.cache.ewram_wait;
+                        }
+                        None => error!("Couldn't read addr {:x?} from On-Board WRAM", addr),
                     }
-                    None => error!("Couldn't read addr {:x?} from On-Board WRAM", addr),
+                } else {
+                    let index =
+                        ((addr - 0x02000000) % self.internal.wram_on_chip.len() as u32) as usize;
+
+                    match self.internal.wram_on_chip.get(index) {
+                        Some(&value) => {
+                            data = value;
+                            clk = 1;
+                        }
+                        None => error!("Couldn't read addr {:x?} from MIRRORED OnChip WRAM", addr),
+                    }
                 }
             }
 
@@ -53,6 +66,17 @@ impl GBAMemory {
                         clk = 1;
                     }
                     None => error!("Couldn't read addr {:x?} from I/O Registers", addr),
+                }
+            }
+
+            x if is_imc(x) => {
+                let index = (addr & 0x3) as usize;
+                match self.internal.imc.get(index) {
+                    Some(&value) => {
+                        data = value;
+                        clk = 1;
+                    }
+                    None => error!("Couldn't read byte for IMC"),
                 }
             }
 
@@ -83,8 +107,11 @@ impl GBAMemory {
 
             // wram onboard
             0x02000000..=0x02FFFFFF => {
-                clk = 3;
-                // TODO: revisit after waitcnt
+                if self.cache.use_ewram {
+                    clk = self.cache.ewram_wait;
+                } else {
+                    clk = 1;
+                }
             }
 
             // wram onchip
@@ -94,6 +121,10 @@ impl GBAMemory {
 
             // io registers
             0x04000000..=0x040003FF => {
+                clk = 1;
+            }
+
+            x if is_imc(x) => {
                 clk = 1;
             }
 
@@ -123,7 +154,11 @@ impl GBAMemory {
             }
 
             0x02000000..=0x02FFFFFF => {
-                clk = 6;
+                if self.cache.use_ewram {
+                    clk = self.cache.ewram_wait * 2;
+                } else {
+                    clk = 2;
+                }
             }
 
             0x03000000..=0x03FFFFFF => {
@@ -133,6 +168,10 @@ impl GBAMemory {
             // EDGECASE
             0x04000000..=0x040003FF => {
                 clk = 1;
+            }
+
+            x if is_imc(x) => {
+                clk = 2;
             }
 
             // Unused Mem Areas
@@ -289,7 +328,7 @@ impl GBAMemory {
                 match self.external.sram.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = self.sram_wait;
+                        clk = self.cache.sram_wait;
                     }
                     None => error!("Couldn't read addr {:x?} from GamePak SRAM", addr),
                 }
@@ -315,7 +354,7 @@ impl GBAMemory {
 
             0x0E000000..=0x0FFFFFFF => {
                 warn!("Reading 16bit value from FLASH memory");
-                clk = self.sram_wait;
+                clk = self.cache.sram_wait;
             }
 
             _ => {
@@ -338,7 +377,7 @@ impl GBAMemory {
 
             0x0E000000..=0x0FFFFFFF => {
                 warn!("Reading 32bit value from FLASH memory");
-                clk = self.sram_wait;
+                clk = self.cache.sram_wait;
             }
 
             _ => {
