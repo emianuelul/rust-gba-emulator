@@ -289,7 +289,7 @@ impl GBAMemory {
                 match self.external.sram.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = self.ns_sram_wait;
+                        clk = self.sram_wait;
                     }
                     None => error!("Couldn't read addr {:x?} from GamePak SRAM", addr),
                 }
@@ -315,7 +315,7 @@ impl GBAMemory {
 
             0x0E000000..=0x0FFFFFFF => {
                 warn!("Reading 16bit value from FLASH memory");
-                clk = self.ns_sram_wait;
+                clk = self.sram_wait;
             }
 
             _ => {
@@ -338,7 +338,7 @@ impl GBAMemory {
 
             0x0E000000..=0x0FFFFFFF => {
                 warn!("Reading 32bit value from FLASH memory");
-                clk = self.ns_sram_wait;
+                clk = self.sram_wait;
             }
 
             _ => {
@@ -371,7 +371,7 @@ impl GBAMemory {
             ),
         }
 
-        self.last_access.set(addr);
+        self.last_access.set((addr, 1));
         data
     }
 
@@ -395,7 +395,7 @@ impl GBAMemory {
             ),
         }
 
-        self.last_access.set(addr);
+        self.last_access.set((addr, 2));
         data
     }
 
@@ -419,7 +419,7 @@ impl GBAMemory {
             ),
         }
 
-        self.last_access.set(addr);
+        self.last_access.set((addr, 4));
         data
     }
 }

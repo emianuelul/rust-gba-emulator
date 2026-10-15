@@ -1,5 +1,6 @@
 use super::GBAMemory;
-use crate::utility_fns::{align16, align32, get_rom_mirror_clk, touches_waitcnt};
+use crate::system_ctrl_registers::{IMC_ADDR, WAITCNT_ADDR};
+use crate::utility_fns::{align16, align32, get_rom_mirror_clk, touches_addr};
 use tracing::{error, warn};
 
 // TODO: revisit on board wram after waitcnt
@@ -267,7 +268,7 @@ impl GBAMemory {
                 let index = ((addr - 0x0E000000) % self.external.sram.len() as u32) as usize;
                 self.external.sram[index] = data;
 
-                clk = self.ns_sram_wait;
+                clk = self.sram_wait;
             }
 
             _ => {
@@ -289,7 +290,7 @@ impl GBAMemory {
             }
 
             0x0E000000..=0x0FFFFFFF => {
-                clk = self.ns_sram_wait;
+                clk = self.sram_wait;
             }
 
             _ => {
@@ -314,7 +315,7 @@ impl GBAMemory {
                 return clk;
             }
 
-            0x0E000000..=0x0FFFFFFF => clk = self.ns_sram_wait,
+            0x0E000000..=0x0FFFFFFF => clk = self.sram_wait,
 
             _ => {
                 error!("Couldn't write addr {:x?} from external memory", addr)
@@ -338,9 +339,11 @@ impl GBAMemory {
         match addr {
             0x00000000..=0x04FFFFFF => {
                 clk = self.write8_internal(addr, data);
-                if touches_waitcnt(addr, 1) {
+                if touches_addr(WAITCNT_ADDR, addr, 1) {
                     tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
+                } else if touches_addr(IMC_ADDR, addr, 1) {
+                    self.update_imc_cache();
                 }
             }
 
@@ -356,7 +359,7 @@ impl GBAMemory {
             ),
         }
 
-        self.last_access.set(addr);
+        self.last_access.set((addr, 1));
         clk
     }
 
@@ -368,9 +371,11 @@ impl GBAMemory {
         match addr {
             0x00000000..=0x04FFFFFF => {
                 clk = self.write16_internal(addr, data);
-                if touches_waitcnt(addr, 2) {
+                if touches_addr(WAITCNT_ADDR, addr, 2) {
                     tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
+                } else if touches_addr(IMC_ADDR, addr, 2) {
+                    self.update_imc_cache();
                 }
             }
 
@@ -386,7 +391,7 @@ impl GBAMemory {
             ),
         }
 
-        self.last_access.set(addr);
+        self.last_access.set((addr, 2));
         clk
     }
 
@@ -398,9 +403,11 @@ impl GBAMemory {
         match addr {
             0x00000000..=0x04FFFFFF => {
                 clk = self.write32_internal(addr, data);
-                if touches_waitcnt(addr, 4) {
+                if touches_addr(WAITCNT_ADDR, addr, 4) {
                     tracing::debug!("WAITCNT UPDATED!");
                     self.update_waitcnt_cache();
+                } else if touches_addr(IMC_ADDR, addr, 4) {
+                    self.update_imc_cache();
                 }
             }
 
@@ -416,7 +423,7 @@ impl GBAMemory {
             ),
         }
 
-        self.last_access.set(addr);
+        self.last_access.set((addr, 4));
         clk
     }
 }

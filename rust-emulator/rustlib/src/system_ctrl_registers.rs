@@ -4,16 +4,16 @@ pub const WAITCNT_ADDR: u32 = 0x04000204;
 
 // first - N
 // second - S
-pub const WAITCNT_SRAM_WAIT: (u8, u8) = (0, 2);
-pub const WAITCNT_WS0_FIRST: (u8, u8) = (2, 2);
-pub const WAITCNT_WS0_SECOND: (u8, u8) = (4, 1);
-pub const WAITCNT_WS1_FIRST: (u8, u8) = (5, 2);
-pub const WAITCNT_WS1_SECOND: (u8, u8) = (7, 1);
-pub const WAITCNT_WS2_FIRST: (u8, u8) = (8, 2);
-pub const WAITCNT_WS2_SECOND: (u8, u8) = (10, 1);
-pub const WAITCNT_PHI: (u8, u8) = (11, 2);
-pub const WAITCNT_PREFETCH: (u8, u8) = (14, 1);
-pub const WAITCNT_GAMEPAK_TYPE: (u8, u8) = (15, 1);
+const WAITCNT_SRAM_WAIT: (u8, u8) = (0, 2);
+const WAITCNT_WS0_FIRST: (u8, u8) = (2, 2);
+const WAITCNT_WS0_SECOND: (u8, u8) = (4, 1);
+const WAITCNT_WS1_FIRST: (u8, u8) = (5, 2);
+const WAITCNT_WS1_SECOND: (u8, u8) = (7, 1);
+const WAITCNT_WS2_FIRST: (u8, u8) = (8, 2);
+const WAITCNT_WS2_SECOND: (u8, u8) = (10, 1);
+const WAITCNT_PHI: (u8, u8) = (11, 2);
+const WAITCNT_PREFETCH: (u8, u8) = (14, 1);
+const WAITCNT_GAMEPAK_TYPE: (u8, u8) = (15, 1);
 
 // 32bit
 pub struct WAITCNT {
@@ -29,9 +29,34 @@ pub struct WAITCNT {
     gamepak_type: bool,
 }
 
+const IMC_DISABLE_IE_WRAM: (u8, u8) = (0, 1);
+const IMC_DISABLE_CGB_BOOTROM: (u8, u8) = (3, 1);
+const IMC_ENABLE_WRAM: (u8, u8) = (5, 1);
+const IMC_WAITCNT_EWRAM: (u8, u8) = (24, 4);
+
+pub const IMC_ADDR: u32 = 0x04000800;
+pub struct InternalMemCnt {
+    disable_ie_wram: bool,
+    disable_cgb_bootrom: bool,
+    enable_ewram: bool,
+    waitcnt_ewram: u8,
+}
+
 const N_WAIT_TIMES: [u32; 4] = [4, 3, 2, 8];
 
 impl GBAMemory {
+    pub fn update_imc_cache(&mut self) {
+        let imc = self.get_imc();
+
+        if imc.waitcnt_ewram == 15 {
+            tracing::error!("EWRAM Wait = LOCKUP");
+            return;
+        }
+
+        let ewram_wait = (15 - imc.waitcnt_ewram) + 1;
+        self.ewram_wait = ewram_wait as u32;
+    }
+
     pub fn update_waitcnt_cache(&mut self) {
         let waitcnt = self.get_waitcnt();
 
@@ -61,7 +86,7 @@ impl GBAMemory {
         self.ns0_wait = (n0, s0);
         self.ns1_wait = (n1, s1);
         self.ns2_wait = (n2, s2);
-        self.ns_sram_wait = sram_wait;
+        self.sram_wait = sram_wait;
     }
 
     pub fn get_waitcnt(&self) -> WAITCNT {
@@ -89,6 +114,23 @@ impl GBAMemory {
             phi,
             prefetch,
             gamepak_type,
+        }
+    }
+
+    pub fn get_imc(&self) -> InternalMemCnt {
+        let register = self.read16(IMC_ADDR).0;
+
+        let disable_ie_wram = get_register16_field_value(register, IMC_DISABLE_IE_WRAM) == 1;
+        let disable_cgb_bootrom =
+            get_register16_field_value(register, IMC_DISABLE_CGB_BOOTROM) == 1;
+        let enable_ewram = get_register16_field_value(register, IMC_ENABLE_WRAM) == 1;
+        let waitcnt_ewram = get_register16_field_value(register, IMC_WAITCNT_EWRAM) as u8;
+
+        InternalMemCnt {
+            disable_ie_wram,
+            disable_cgb_bootrom,
+            enable_ewram,
+            waitcnt_ewram,
         }
     }
 }

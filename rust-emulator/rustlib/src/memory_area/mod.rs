@@ -1,7 +1,7 @@
 mod reads;
 mod writes;
 
-use crate::system_ctrl_registers::WAITCNT_ADDR;
+use crate::system_ctrl_registers::{IMC_ADDR, WAITCNT_ADDR};
 use std::cell::Cell;
 
 struct InternalMemory {
@@ -35,13 +35,12 @@ pub struct GBAMemory {
     internal: InternalMemory,
     display: DisplayMemory,
     external: ExternalMemory,
-    // TODO: use once n/s logic exists
-    last_access: Cell<u32>,
-    // unused 0x10000000 - 0xFFFFFFFF
+    last_access: Cell<(u32, u8)>,
     pub ns0_wait: (u32, u32),
     pub ns1_wait: (u32, u32),
     pub ns2_wait: (u32, u32),
-    pub ns_sram_wait: u32,
+    pub sram_wait: u32,
+    pub ewram_wait: u32,
 }
 
 // INIT
@@ -76,21 +75,24 @@ impl ExternalMemory {
 }
 
 const TEMP_WAITCNT: u16 = 0x4317;
+const TEMP_IMC: u32 = 0x0D000020;
 impl GBAMemory {
     pub fn new(rom_data: Vec<u8>) -> Self {
         let mut returned = GBAMemory {
             internal: InternalMemory::new(),
             display: DisplayMemory::new(),
             external: ExternalMemory::new(rom_data),
-            last_access: 0.into(),
+            last_access: (0, 0).into(),
             ns0_wait: (0, 0),
             ns1_wait: (0, 0),
             ns2_wait: (0, 0),
-            ns_sram_wait: 0,
+            sram_wait: 0,
+            ewram_wait: 0,
         };
 
         // REMOVE: AFTER BIOS INIT
         returned.write16(WAITCNT_ADDR, TEMP_WAITCNT);
+        returned.write32(IMC_ADDR, TEMP_IMC);
 
         returned
     }
