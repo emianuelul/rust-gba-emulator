@@ -4,21 +4,6 @@ mod writes;
 use crate::system_ctrl_registers::WAITCNT_ADDR;
 use std::cell::Cell;
 
-fn get_rom_mirror_clk(addr: u32, mem: &GBAMemory) -> u32 {
-    let wait = (addr >> 25) & 3;
-    match wait {
-        0 => mem.ns0_wait.0 + mem.ns0_wait.1,
-
-        1 => mem.ns1_wait.0 + mem.ns1_wait.1,
-
-        2 => mem.ns2_wait.0 + mem.ns2_wait.1,
-
-        _ => {
-            unreachable!()
-        }
-    }
-}
-
 struct InternalMemory {
     bios: Vec<u8>, // 16Kb      0x00000000 - 0x00003FFF
     // unused ~32Mb     0x00004000 - 0x01FFFFFF

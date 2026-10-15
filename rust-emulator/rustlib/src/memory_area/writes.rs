@@ -1,5 +1,5 @@
-use super::{get_rom_mirror_clk, GBAMemory};
-use crate::utility_fns::{align16, align32, touches_waitcnt};
+use super::GBAMemory;
+use crate::utility_fns::{align16, align32, get_rom_mirror_clk, touches_waitcnt};
 use tracing::{error, warn};
 
 // TODO: revisit on board wram after waitcnt
@@ -259,7 +259,7 @@ impl GBAMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                clk = get_rom_mirror_clk(addr, self);
+                clk = get_rom_mirror_clk(addr, self, 1);
                 warn!("Tried to write to ROM memory");
             }
 
@@ -283,7 +283,7 @@ impl GBAMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                clk = get_rom_mirror_clk(addr, self);
+                clk = get_rom_mirror_clk(addr, self, 2);
                 warn!("Tried to write 16bit to ROM memory");
                 return clk;
             }
@@ -309,7 +309,7 @@ impl GBAMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                clk = get_rom_mirror_clk(addr, self);
+                clk = get_rom_mirror_clk(addr, self, 4);
                 warn!("Tried to write 32bit value to ROM");
                 return clk;
             }
@@ -356,6 +356,7 @@ impl GBAMemory {
             ),
         }
 
+        self.last_access.set(addr);
         clk
     }
 
@@ -385,6 +386,7 @@ impl GBAMemory {
             ),
         }
 
+        self.last_access.set(addr);
         clk
     }
 
@@ -414,6 +416,7 @@ impl GBAMemory {
             ),
         }
 
+        self.last_access.set(addr);
         clk
     }
 }
