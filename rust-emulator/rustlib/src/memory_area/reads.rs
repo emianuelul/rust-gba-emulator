@@ -83,7 +83,9 @@ impl GBAMemory {
             // Unused Mem Areas
             0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
                 warn!("Accessing unused memory addr: {:x?}", addr);
-                // TODO: IMPLEMENT SPECIAL CASE
+                let raw_data = self.fetched_opcode.get();
+                data = (raw_data >> ((addr & 3) * 8)) as u8;
+                clk = 1;
             }
 
             _ => {
@@ -131,7 +133,7 @@ impl GBAMemory {
             // Unused Mem Areas
             0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
                 warn!("Accessing unused memory addr: {:x?}", addr);
-                // TODO: unused memory special case
+                clk = 1;
             }
 
             _ => {
@@ -177,7 +179,7 @@ impl GBAMemory {
             // Unused Mem Areas
             0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
                 warn!("Accessing unused memory addr: {:x?}", addr);
-                // TODO: unused memory special case
+                clk = 1;
             }
 
             _ => {
@@ -313,14 +315,12 @@ impl GBAMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                let index = ((addr - 0x08000000) % self.external.rom.len() as u32) as usize;
-                match self.external.rom.get(index) {
-                    Some(&value) => {
-                        clk = self.get_rom_mirror_clk(addr, 1);
-                        data = value;
-                    }
-                    None => error!("Couldn't read addr {:x?} from GamePak ROM", addr),
-                }
+                let offset = (addr & 0x01FFFFFF) as usize;
+                clk = self.get_rom_mirror_clk(addr, 1);
+                data = match self.external.rom.get(offset) {
+                    Some(&value) => value,
+                    None => (((addr >> 1) & 0xFFFF) >> ((addr & 1) * 8)) as u8,
+                };
             }
 
             0x0E000000..=0x0FFFFFFF => {
@@ -438,6 +438,16 @@ impl GBAMemory {
         data
     }
 
+    pub fn peek16(&self, addr: u32) -> u16 {
+        let addr = align16(addr);
+        match addr {
+            0x00000000..=0x04FFFFFF => self.read16_internal(addr).0,
+            0x05000000..=0x07FFFFFF => self.read16_display(addr).0,
+            0x08000000..=0x0FFFFFFF => self.read16_external(addr).0,
+            _ => 0,
+        }
+    }
+
     pub fn read32(&self, addr: u32) -> (u32, u32) {
         let addr = align32(addr);
 
@@ -460,5 +470,15 @@ impl GBAMemory {
 
         self.last_access.set((addr, 4));
         data
+    }
+
+    pub fn peek32(&self, addr: u32) -> u32 {
+        let addr = align32(addr);
+        match addr {
+            0x00000000..=0x04FFFFFF => self.read32_internal(addr).0,
+            0x05000000..=0x07FFFFFF => self.read32_display(addr).0,
+            0x08000000..=0x0FFFFFFF => self.read32_external(addr).0,
+            _ => 0,
+        }
     }
 }

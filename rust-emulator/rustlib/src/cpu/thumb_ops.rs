@@ -3,10 +3,10 @@ use crate::memory_area::*;
 use bitmatch::bitmatch;
 use tracing::error;
 
-use super::CPU;
+use super::Cpu;
 
 // THUMB Decode, Execute
-impl CPU {
+impl Cpu {
     #[bitmatch]
     pub fn thumb_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) {
         #[bitmatch]
@@ -194,7 +194,7 @@ impl CPU {
 }
 
 // THUMB Register Op Logic
-impl CPU {
+impl Cpu {
     fn ro_execute_move_shifted(&mut self, opcode: u8, rd: usize, rs: usize, offset: u8) {
         let rs_value = self.get_register_value(rs);
 
@@ -797,7 +797,7 @@ impl CPU {
 }
 
 // THUMB load/store logic
-impl CPU {
+impl Cpu {
     fn ls_execute_pcr(&mut self, memory: &mut GBAMemory, rd: usize, imm: u32) -> u32 {
         let pc_value = (self.registers.pc.wrapping_add(2)) & !2;
         let addr = pc_value.wrapping_add(imm);
@@ -1124,7 +1124,7 @@ impl CPU {
 }
 
 // THUMB Memory Addressing
-impl CPU {
+impl Cpu {
     fn ma_execute_ra(&mut self, opcode: u8, rd: usize, imm: u32) {
         match opcode {
             // add rd, pc, imm
@@ -1179,7 +1179,7 @@ impl CPU {
 }
 
 // THUMB Multiple Load Store
-impl CPU {
+impl Cpu {
     fn mls_exec_pp(
         &mut self,
         memory: &mut GBAMemory,
@@ -1328,7 +1328,7 @@ impl CPU {
 }
 
 // THUMB Jumps and Calls
-impl CPU {
+impl Cpu {
     fn jc_execute_cb(&mut self, cond: bool, offset: u32) {
         if !cond {
             return;

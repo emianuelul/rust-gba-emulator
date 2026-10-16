@@ -43,6 +43,7 @@ pub struct Cache {
 
 pub struct GBAMemory {
     last_access: Cell<(u32, u8)>,
+    fetched_opcode: Cell<u32>,
     internal: InternalMemory,
     display: DisplayMemory,
     external: ExternalMemory,
@@ -126,6 +127,10 @@ impl GBAMemory {
             }
         }
     }
+
+    pub fn set_fetched_opcode(&self, opcode: u32) {
+        self.fetched_opcode.set(opcode);
+    }
 }
 
 const TEMP_WAITCNT: u16 = 0x4317;
@@ -134,6 +139,7 @@ impl GBAMemory {
     pub fn new(rom_data: Vec<u8>) -> Self {
         let mut returned = GBAMemory {
             last_access: (0, 0).into(),
+            fetched_opcode: 0.into(),
             internal: InternalMemory::new(),
             display: DisplayMemory::new(),
             external: ExternalMemory::new(rom_data),

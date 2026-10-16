@@ -1,11 +1,11 @@
-use super::{CPUMode, CPU};
+use super::{CPUMode, Cpu};
 use crate::constants::*;
 use crate::memory_area::*;
 use bitmatch::bitmatch;
 use tracing::{error, warn};
 
 // ARM Debug Execute Logic
-impl CPU {
+impl Cpu {
     #[bitmatch]
     pub fn arm_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) {
         #[bitmatch]
@@ -254,7 +254,7 @@ impl CPU {
 }
 
 // ARM B, BX Logic
-impl CPU {
+impl Cpu {
     fn b_convert_u24_to_i32(&self, value: u32) -> i32 {
         ((value << 8) as i32) >> 8
     }
@@ -304,7 +304,7 @@ impl CPU {
 }
 
 // ARM ALU Logic
-impl CPU {
+impl Cpu {
     fn alu_get_arm_operand_value(&self, index: usize, i: u8, r: u8) -> u32 {
         if index == PC {
             if i == 0 && r == 1 {
@@ -753,7 +753,7 @@ impl CPU {
 }
 
 // ARM MUL Logic
-impl CPU {
+impl Cpu {
     fn mul_execute_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
         let rs_value = self.get_register_value(rs as usize);
         let rm_value = self.get_register_value(rm as usize);
@@ -938,7 +938,7 @@ impl CPU {
 }
 
 // ARM PSR Transfer Logic
-impl CPU {
+impl Cpu {
     fn psrt_get_new_psr(
         &self,
         psr: u32,
@@ -1046,7 +1046,7 @@ impl CPU {
 }
 
 // ARM Single Data Transfer
-impl CPU {
+impl Cpu {
     fn sdt_rrx(&mut self, to_shift: u32) -> u32 {
         let old_c = self.get_cpsr_bit(C_FLAG);
 
@@ -1320,7 +1320,7 @@ impl CPU {
 }
 
 // ARM HSDT
-impl CPU {
+impl Cpu {
     fn hsdt_strh(
         &mut self,
         memory: &mut GBAMemory,
@@ -1473,7 +1473,7 @@ impl CPU {
 }
 
 // ARM Block Data Transfer
-impl CPU {
+impl Cpu {
     fn bdt_get_start_addr(
         &self,
         block_size: usize,
@@ -1610,7 +1610,7 @@ impl CPU {
 }
 
 // ARM SWP Logic
-impl CPU {
+impl Cpu {
     fn swp_execute(
         &mut self,
         memory: &mut GBAMemory,

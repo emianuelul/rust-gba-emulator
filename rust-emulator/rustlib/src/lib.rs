@@ -9,7 +9,7 @@ pub mod utility_fns;
 
 #[cfg(test)]
 mod tests {
-    use crate::cpu::CPU;
+    use crate::cpu::Cpu;
     use crate::memory_area::GBAMemory;
     use std::collections::{HashSet, VecDeque};
 
@@ -40,7 +40,7 @@ mod tests {
         let rom = std::fs::read(tests[test]).expect("Test not found");
 
         let mut mem = GBAMemory::new(rom);
-        let mut cpu = CPU::new();
+        let mut cpu = Cpu::new();
 
         let mut counter: u32 = 0;
 

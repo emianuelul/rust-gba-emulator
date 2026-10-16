@@ -59,7 +59,7 @@ impl GBAMemory {
             // Unused Mem Areas
             0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
                 warn!("Accessing unused memory addr: {:x?}", addr);
-                // TODO: IMPLEMENT SPECIAL CASE
+                clk = 1;
             }
 
             _ => {
@@ -107,7 +107,7 @@ impl GBAMemory {
             // Unused Mem Areas
             0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
                 warn!("Accessing unused memory addr: {:x?}", addr);
-                // TODO: IMPLEMENT SPECIAL CASE
+                clk = 1;
             }
 
             _ => {
@@ -160,7 +160,7 @@ impl GBAMemory {
             // Unused Mem Areas
             0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
                 warn!("Accessing unused memory addr: {:x?}", addr);
-                // TODO: IMPLEMENT SPECIAL CASE
+                clk = 1;
             }
 
             _ => {

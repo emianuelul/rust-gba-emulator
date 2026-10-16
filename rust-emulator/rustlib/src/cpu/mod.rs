@@ -52,16 +52,16 @@ impl CPURegisters {
     }
 }
 
-pub struct CPU {
+pub struct Cpu {
     pub registers: CPURegisters,
     pub cpsr: u32,
     pub spsr: HashMap<CPUMode, u32>,
 }
 
 // init
-impl CPU {
+impl Cpu {
     pub fn new() -> Self {
-        CPU {
+        Cpu {
             registers: CPURegisters::new(),
             cpsr: 0x0000_00D3,
             spsr: HashMap::from([
@@ -75,14 +75,14 @@ impl CPU {
     }
 }
 
-impl Default for CPU {
+impl Default for Cpu {
     fn default() -> Self {
-        CPU::new()
+        Cpu::new()
     }
 }
 
 // Registers I/O
-impl CPU {
+impl Cpu {
     pub fn set_register_value(&mut self, index: usize, data: u32) {
         let curr_mode = self.get_effective_cpu_mode();
 
@@ -192,7 +192,7 @@ impl CPU {
 }
 
 // CPSR Ops
-impl CPU {
+impl Cpu {
     pub fn get_cpsr_bit(&self, index: usize) -> u8 {
         ((self.cpsr >> index) & 1) as u8
     }
@@ -305,16 +305,20 @@ impl CPU {
 }
 
 // CPU Fetch, Decode, Execute
-impl CPU {
+impl Cpu {
     fn cpu_fetch(&mut self, memory: &mut GBAMemory) -> (u32, u32) {
+        let pc = self.get_register_value(PC);
         match self.get_cpu_state() {
             CPUState::Arm => {
-                let (instruction, read) = memory.read32(self.get_register_value(PC));
+                let (instruction, read) = memory.read32(pc);
+                memory.set_fetched_opcode(memory.peek32(pc.wrapping_add(8)));
                 self.registers.pc = self.registers.pc.wrapping_add(4);
                 (instruction, read)
             }
             CPUState::Thumb => {
-                let (instruction, read) = memory.read16(self.get_register_value(PC));
+                let (instruction, read) = memory.read16(pc);
+                let h = memory.peek16(pc.wrapping_add(4)) as u32;
+                memory.set_fetched_opcode(h | (h << 16));
                 self.registers.pc = self.registers.pc.wrapping_add(2);
                 (instruction as u32, read)
             }
@@ -337,7 +341,7 @@ impl CPU {
 // Step Logic
 // TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
-impl CPU {
+impl Cpu {
     #[bitmatch]
     pub fn step(&mut self, memory: &mut GBAMemory) -> u32 {
         let (instruction, clk) = self.cpu_fetch(memory);
