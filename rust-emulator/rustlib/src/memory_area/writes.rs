@@ -1,9 +1,8 @@
 use super::GBAMemory;
 use crate::system_ctrl_registers::WAITCNT_ADDR;
-use crate::utility_fns::{align16, align32, get_rom_mirror_clk, is_imc, touches_addr};
+use crate::utility_fns::{align16, align32, is_imc, touches_addr};
 use tracing::{error, warn};
 
-// TODO: revisit on board wram after waitcnt
 // INTERNAL MEMORY WRITES
 impl GBAMemory {
     fn write8_internal(&mut self, addr: u32, data: u8) -> u32 {
@@ -50,11 +49,11 @@ impl GBAMemory {
                 clk = 1;
             }
 
-            // EWRAM
+            // write to imc
             x if is_imc(x) => {
                 let index = (addr & 0x3) as usize;
                 self.internal.imc[index] = data;
-                clk = self.cache.ewram_wait;
+                clk = 1;
             }
 
             // Unused Mem Areas
@@ -85,7 +84,11 @@ impl GBAMemory {
             }
 
             0x02000000..=0x02FFFFFF => {
-                clk = self.cache.ewram_wait;
+                if self.cache.use_ewram {
+                    clk = self.cache.ewram_wait;
+                } else {
+                    clk = 1;
+                }
             }
 
             0x03000000..=0x03FFFFFF => {
@@ -98,7 +101,7 @@ impl GBAMemory {
             }
 
             x if is_imc(x) => {
-                clk = self.cache.ewram_wait;
+                clk = 1;
             }
 
             // Unused Mem Areas
@@ -134,7 +137,11 @@ impl GBAMemory {
             }
 
             0x02000000..=0x02FFFFFF => {
-                clk = self.cache.ewram_wait * 2;
+                if self.cache.use_ewram {
+                    clk = self.cache.ewram_wait * 2;
+                } else {
+                    clk = 1;
+                }
             }
 
             0x03000000..=0x03FFFFFF => {
@@ -147,7 +154,7 @@ impl GBAMemory {
             }
 
             x if is_imc(x) => {
-                clk = self.cache.ewram_wait * 2;
+                clk = 1;
             }
 
             // Unused Mem Areas
@@ -284,7 +291,7 @@ impl GBAMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                clk = get_rom_mirror_clk(addr, self, 1);
+                clk = self.get_rom_mirror_clk(addr, 1);
                 warn!("Tried to write to ROM memory");
             }
 
@@ -308,7 +315,7 @@ impl GBAMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                clk = get_rom_mirror_clk(addr, self, 2);
+                clk = self.get_rom_mirror_clk(addr, 2);
                 warn!("Tried to write 16bit to ROM memory");
                 return clk;
             }
@@ -334,7 +341,7 @@ impl GBAMemory {
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                clk = get_rom_mirror_clk(addr, self, 4);
+                clk = self.get_rom_mirror_clk(addr, 4);
                 warn!("Tried to write 32bit value to ROM");
                 return clk;
             }

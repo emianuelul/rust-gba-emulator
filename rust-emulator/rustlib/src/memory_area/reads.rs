@@ -1,5 +1,5 @@
 use super::GBAMemory;
-use crate::utility_fns::{align16, align32, get_rom_mirror_clk, is_imc};
+use crate::utility_fns::{align16, align32, is_imc};
 use tracing::{error, warn};
 
 // INTERNAL MEMORY READS
@@ -157,7 +157,7 @@ impl GBAMemory {
                 if self.cache.use_ewram {
                     clk = self.cache.ewram_wait * 2;
                 } else {
-                    clk = 2;
+                    clk = 1;
                 }
             }
 
@@ -171,7 +171,7 @@ impl GBAMemory {
             }
 
             x if is_imc(x) => {
-                clk = 2;
+                clk = 1;
             }
 
             // Unused Mem Areas
@@ -316,7 +316,7 @@ impl GBAMemory {
                 let index = ((addr - 0x08000000) % self.external.rom.len() as u32) as usize;
                 match self.external.rom.get(index) {
                     Some(&value) => {
-                        clk = get_rom_mirror_clk(addr, self, 1);
+                        clk = self.get_rom_mirror_clk(addr, 1);
                         data = value;
                     }
                     None => error!("Couldn't read addr {:x?} from GamePak ROM", addr),
@@ -349,7 +349,7 @@ impl GBAMemory {
         let mut clk: u32 = 0;
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                clk = get_rom_mirror_clk(addr, self, 2);
+                clk = self.get_rom_mirror_clk(addr, 2);
             }
 
             0x0E000000..=0x0FFFFFFF => {
@@ -372,7 +372,7 @@ impl GBAMemory {
         let mut clk: u32 = 0;
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                clk = get_rom_mirror_clk(addr, self, 4);
+                clk = self.get_rom_mirror_clk(addr, 4);
             }
 
             0x0E000000..=0x0FFFFFFF => {

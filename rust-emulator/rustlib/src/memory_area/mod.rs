@@ -94,6 +94,40 @@ impl Cache {
     }
 }
 
+impl GBAMemory {
+    fn get_rom_mirror_clk(&self, addr: u32, bytes: u8) -> u32 {
+        let sequential: bool = addr == self.last_access.get().0 + self.last_access.get().1 as u32
+            && !addr.is_multiple_of(128 * 1024);
+
+        let wait = (addr >> 25) & 3;
+        let (n, s) = match wait {
+            0 => self.cache.ns0_wait,
+
+            1 => self.cache.ns1_wait,
+
+            2 => self.cache.ns2_wait,
+
+            _ => {
+                unreachable!()
+            }
+        };
+
+        if sequential {
+            if bytes == 4 {
+                s * 2
+            } else {
+                s
+            }
+        } else {
+            if bytes == 4 {
+                n + s
+            } else {
+                n
+            }
+        }
+    }
+}
+
 const TEMP_WAITCNT: u16 = 0x4317;
 const TEMP_IMC: u32 = 0x0D000020;
 impl GBAMemory {

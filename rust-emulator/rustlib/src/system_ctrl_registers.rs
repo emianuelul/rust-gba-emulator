@@ -57,7 +57,9 @@ impl GBAMemory {
         }
 
         let ewram_wait = (15 - imc.waitcnt_ewram) + 1;
+        let use_ewram = imc.enable_ewram;
         self.cache.ewram_wait = ewram_wait as u32;
+        self.cache.use_ewram = use_ewram;
     }
 
     pub fn update_waitcnt_cache(&mut self) {
