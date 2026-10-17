@@ -4,7 +4,7 @@ use tracing::{error, warn};
 
 // INTERNAL MEMORY READS
 impl GBAMemory {
-    fn read8_internal(&self, addr: u32) -> (u8, u32) {
+    fn read8_internal(&self, addr: u32) -> u8 {
         let mut data: u8 = 0;
         match addr {
             // EDGECASE
@@ -75,7 +75,6 @@ impl GBAMemory {
 
             // Unused Mem Areas
             0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
-                warn!("Accessing unused memory addr: {:x?}", addr);
                 let raw_data = self.fetched_opcode.get();
                 data = (raw_data >> ((addr & 3) * 8)) as u8;
             }
@@ -85,34 +84,28 @@ impl GBAMemory {
             }
         }
 
-        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
-
-        (data, clk)
+        data
     }
 
-    fn read16_internal(&self, addr: u32) -> (u16, u32) {
-        let first = self.read8_internal(addr).0 as u16;
-        let second = self.read8_internal(addr + 1).0 as u16;
+    fn read16_internal(&self, addr: u32) -> u16 {
+        let first = self.read8_internal(addr) as u16;
+        let second = self.read8_internal(addr + 1) as u16;
 
-        let clk: u32 = self.get_access_clk(addr, 2, self.is_sequential(addr));
-
-        (first | (second << 8), clk)
+        first | (second << 8)
     }
 
-    fn read32_internal(&self, addr: u32) -> (u32, u32) {
-        let first = self.read16_internal(addr).0 as u32;
-        let second = self.read16_internal(addr + 2).0 as u32;
+    fn read32_internal(&self, addr: u32) -> u32 {
+        let first = self.read16_internal(addr) as u32;
+        let second = self.read16_internal(addr + 2) as u32;
 
-        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
-
-        (first | (second << 16), clk)
+        first | (second << 16)
     }
 }
 
 // TODO: revisit after ppu (+1 clk if memory is accessed during rendering)
 // DISPLAY MEMORY READS
 impl GBAMemory {
-    fn read8_display(&self, addr: u32) -> (u8, u32) {
+    fn read8_display(&self, addr: u32) -> u8 {
         let mut data: u8 = 0;
 
         match addr {
@@ -159,34 +152,28 @@ impl GBAMemory {
             }
         }
 
-        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
-
-        (data, clk)
+        data
     }
 
-    fn read16_display(&self, addr: u32) -> (u16, u32) {
-        let first = self.read8_display(addr).0 as u16;
-        let second = self.read8_display(addr + 1).0 as u16;
+    fn read16_display(&self, addr: u32) -> u16 {
+        let first = self.read8_display(addr) as u16;
+        let second = self.read8_display(addr + 1) as u16;
 
-        let clk: u32 = self.get_access_clk(addr, 2, self.is_sequential(addr));
-
-        (first | (second << 8), clk)
+        first | (second << 8)
     }
 
-    fn read32_display(&self, addr: u32) -> (u32, u32) {
-        let first = self.read16_display(addr).0 as u32;
-        let second = self.read16_display(addr + 2).0 as u32;
+    fn read32_display(&self, addr: u32) -> u32 {
+        let first = self.read16_display(addr) as u32;
+        let second = self.read16_display(addr + 2) as u32;
 
-        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
-
-        (first | (second << 16), clk)
+        first | (second << 16)
     }
 }
 
 // TODO: revisit rom memory after waitcnt
 // EXTERNAL MEMORY READS
 impl GBAMemory {
-    fn read8_external(&self, addr: u32) -> (u8, u32) {
+    fn read8_external(&self, addr: u32) -> u8 {
         let mut data: u8 = 0;
 
         match addr {
@@ -213,27 +200,21 @@ impl GBAMemory {
             }
         }
 
-        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
-
-        (data, clk)
+        data
     }
 
-    fn read16_external(&self, addr: u32) -> (u16, u32) {
-        let first = self.read8_external(addr).0 as u16;
-        let second = self.read8_external(addr + 1).0 as u16;
+    fn read16_external(&self, addr: u32) -> u16 {
+        let first = self.read8_external(addr) as u16;
+        let second = self.read8_external(addr + 1) as u16;
 
-        let clk: u32 = self.get_access_clk(addr, 2, self.is_sequential(addr));
-
-        (first | (second << 8), clk)
+        first | (second << 8)
     }
 
-    fn read32_external(&self, addr: u32) -> (u32, u32) {
-        let first = self.read16_external(addr).0 as u32;
-        let second = self.read16_external(addr + 2).0 as u32;
+    fn read32_external(&self, addr: u32) -> u32 {
+        let first = self.read16_external(addr) as u32;
+        let second = self.read16_external(addr + 2) as u32;
 
-        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
-
-        (first | (second << 16), clk)
+        first | (second << 16)
     }
 }
 
@@ -241,7 +222,7 @@ impl GBAMemory {
 impl GBAMemory {
     // TODO: UNUSED MEMORY READ/WRITE SPECIAL CASE FUNCTION
     pub fn read8(&self, addr: u32) -> (u8, u32) {
-        let mut data: (u8, u32) = (0, 0);
+        let mut data: u8 = 0;
 
         match addr {
             0x00000000..=0x04FFFFFF => data = self.read8_internal(addr),
@@ -258,14 +239,15 @@ impl GBAMemory {
             ),
         }
 
+        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
         self.last_access.set((addr, 1));
-        data
+        (data, clk)
     }
 
     pub fn read16(&self, addr: u32) -> (u16, u32) {
         let addr = align16(addr);
 
-        let mut data: (u16, u32) = (0, 0);
+        let mut data: u16 = 0;
 
         match addr {
             0x00000000..=0x04FFFFFF => data = self.read16_internal(addr),
@@ -282,16 +264,17 @@ impl GBAMemory {
             ),
         }
 
+        let clk: u32 = self.get_access_clk(addr, 2, self.is_sequential(addr));
         self.last_access.set((addr, 2));
-        data
+        (data, clk)
     }
 
     pub fn peek16(&self, addr: u32) -> u16 {
         let addr = align16(addr);
         match addr {
-            0x00000000..=0x04FFFFFF => self.read16_internal(addr).0,
-            0x05000000..=0x07FFFFFF => self.read16_display(addr).0,
-            0x08000000..=0x0FFFFFFF => self.read16_external(addr).0,
+            0x00000000..=0x04FFFFFF => self.read16_internal(addr),
+            0x05000000..=0x07FFFFFF => self.read16_display(addr),
+            0x08000000..=0x0FFFFFFF => self.read16_external(addr),
             _ => 0,
         }
     }
@@ -299,7 +282,7 @@ impl GBAMemory {
     pub fn read32(&self, addr: u32) -> (u32, u32) {
         let addr = align32(addr);
 
-        let mut data: (u32, u32) = (0, 0);
+        let mut data: u32 = 0;
 
         match addr {
             0x00000000..=0x04FFFFFF => data = self.read32_internal(addr),
@@ -316,16 +299,17 @@ impl GBAMemory {
             ),
         }
 
+        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
         self.last_access.set((addr, 4));
-        data
+        (data, clk)
     }
 
     pub fn peek32(&self, addr: u32) -> u32 {
         let addr = align32(addr);
         match addr {
-            0x00000000..=0x04FFFFFF => self.read32_internal(addr).0,
-            0x05000000..=0x07FFFFFF => self.read32_display(addr).0,
-            0x08000000..=0x0FFFFFFF => self.read32_external(addr).0,
+            0x00000000..=0x04FFFFFF => self.read32_internal(addr),
+            0x05000000..=0x07FFFFFF => self.read32_display(addr),
+            0x08000000..=0x0FFFFFFF => self.read32_external(addr),
             _ => 0,
         }
     }
