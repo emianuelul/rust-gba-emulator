@@ -7,9 +7,10 @@ use tracing::{error, warn};
 // ARM Debug Execute Logic
 impl Cpu {
     #[bitmatch]
-    pub fn arm_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) {
+    pub fn arm_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) -> u32 {
         #[bitmatch]
         let "cccc_????????????????????????????" = instruction;
+        let mut clk: u32 = 0;
 
         if self.check_condition(c as u8) {
             #[bitmatch]
@@ -18,14 +19,14 @@ impl Cpu {
                 "????_101_o_nnnnnnnnnnnnnnnnnnnnnnnn" => {
                     self.b_execute_op(o as u8, n);
 
-                    // 2S + 1N
+                    clk += memory.cache.ns0_wait.0 * 2;
                 }
 
                 // BX
                 "????_0001_0010_1111_1111_1111_0001_nnnn" => {
                     self.b_execute_bx(n as u8);
 
-                    // 2S + 1N
+                    clk += memory.cache.ns0_wait.0 * 2;
                 }
 
                 // SWI
@@ -39,15 +40,11 @@ impl Cpu {
                     let op = i.rotate_right(h * 2);
 
                     self.psrt_execute_msr_op(p as u8, op, [f as u8, s as u8, x as u8, c as u8]);
-
-                    // 1S
                 }
 
                 // PSR Transfer (i = 0, MRS)
                 "????_00_0_10_p_0_0_1111_dddd_000000000000" => {
                     self.psrt_execute_mrs_op(p as u8, d as u8);
-
-                    // 1S
                 }
 
                 // PSR Transfer (i = 0, MSR)
@@ -55,8 +52,6 @@ impl Cpu {
                     let op = self.get_register_value(m as usize);
 
                     self.psrt_execute_msr_op(p as u8, op, [f as u8, s as u8, x as u8, c as u8]);
-
-                    // 1S
                 }
 
                 // alu (i = 1)
@@ -82,7 +77,9 @@ impl Cpu {
                         (carry_in, shift_carry),
                     );
 
-                    // (1+p)S+rI+pN
+                    if rd == PC && !(0x8u32..=0xBu32).contains(&o) {
+                        clk += memory.cache.ns0_wait.0;
+                    }
                 }
 
                 // alu (i = 0, r = 0)
@@ -105,6 +102,10 @@ impl Cpu {
                         s as u8,
                         (carry_in, shift_carry),
                     );
+
+                    if rd == PC && !(0x8u32..=0xBu32).contains(&o) {
+                        clk += memory.cache.ns0_wait.0;
+                    }
 
                     // (1+p)S+rI+pN
                 }
@@ -130,12 +131,16 @@ impl Cpu {
                         (carry_in, shift_carry),
                     );
 
-                    // (1+p)S+rI+pN
+                    clk += 1;
+                    if rd == PC && !(0x8u32..=0xBu32).contains(&o) {
+                        clk += memory.cache.ns0_wait.0;
+                    }
                 }
 
                 // SWP
                 "????_00010_b_00_nnnn_dddd_00001001_mmmm" => {
                     self.swp_execute(memory, b as u8, n as usize, d as usize, m as usize);
+                    clk += memory.cache.ns0_wait.0 * 2 + 1;
                 }
 
                 // Multiply & Multiply-Accumulate
@@ -248,8 +253,10 @@ impl Cpu {
                 }
             }
         } else {
-            // clk +1S
+            clk += 1;
         }
+
+        clk
     }
 }
 

@@ -8,7 +8,7 @@ use super::Cpu;
 // THUMB Decode, Execute
 impl Cpu {
     #[bitmatch]
-    pub fn thumb_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) {
+    pub fn thumb_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) -> u32 {
         #[bitmatch]
         match instruction {
             // ADD, SUB

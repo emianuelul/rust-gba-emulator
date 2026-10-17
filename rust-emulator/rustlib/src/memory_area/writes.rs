@@ -6,7 +6,6 @@ use tracing::{error, warn};
 // INTERNAL MEMORY WRITES
 impl GBAMemory {
     fn write8_internal(&mut self, addr: u32, data: u8) -> u32 {
-        let mut clk: u32 = 0;
         match addr {
             // EDGECASE
             0x00000000..=0x00003FFF => {
@@ -14,7 +13,6 @@ impl GBAMemory {
                     "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
                     addr, data
                 );
-                clk = 1;
                 // let index = addr as usize;
                 // self.bios[index] = data;
             }
@@ -25,13 +23,11 @@ impl GBAMemory {
                         ((addr - 0x02000000) % self.internal.wram_on_board.len() as u32) as usize;
 
                     self.internal.wram_on_board[index] = data;
-                    clk = self.cache.ewram_wait;
                 } else {
                     let index =
                         ((addr - 0x02000000) % self.internal.wram_on_chip.len() as u32) as usize;
 
                     self.internal.wram_on_chip[index] = data;
-                    clk = 1;
                 }
             }
 
@@ -39,81 +35,37 @@ impl GBAMemory {
                 let index =
                     ((addr - 0x03000000) % self.internal.wram_on_chip.len() as u32) as usize;
                 self.internal.wram_on_chip[index] = data;
-                clk = 1;
             }
 
             // EDGECASE
             0x04000000..=0x040003FF => {
                 let index = (addr - 0x04000000) as usize;
                 self.internal.io_registers[index] = data;
-                clk = 1;
             }
 
             // write to imc
             x if is_imc(x) => {
                 let index = (addr & 0x3) as usize;
                 self.internal.imc[index] = data;
-                clk = 1;
             }
 
             // Unused Mem Areas
             0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
                 warn!("Accessing unused memory addr: {:x?}", addr);
-                clk = 1;
             }
 
             _ => {
                 error!("Couldn't write to addr {:x?} from internal memory", addr)
             }
         }
+
+        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
+
         clk
     }
 
     fn write16_internal(&mut self, addr: u32, data: u16) -> u32 {
-        let mut clk: u32 = 0;
-        match addr {
-            // EDGECASE
-            0x00000000..=0x00003FFF => {
-                warn!(
-                    "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
-                    addr, data
-                );
-                // let index = addr as usize;
-                // self.bios[index] = data;
-                clk = 1;
-            }
-
-            0x02000000..=0x02FFFFFF => {
-                if self.cache.use_ewram {
-                    clk = self.cache.ewram_wait;
-                } else {
-                    clk = 1;
-                }
-            }
-
-            0x03000000..=0x03FFFFFF => {
-                clk = 1;
-            }
-
-            // EDGECASE
-            0x04000000..=0x040003FF => {
-                clk = 1;
-            }
-
-            x if is_imc(x) => {
-                clk = 1;
-            }
-
-            // Unused Mem Areas
-            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
-                warn!("Accessing unused memory addr: {:x?}", addr);
-                clk = 1;
-            }
-
-            _ => {
-                error!("Couldn't write to addr {:x?} from internal memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 2, self.is_sequential(addr));
 
         let bytes = data.to_le_bytes();
         let _ = self.write8_internal(addr, bytes[0]);
@@ -123,50 +75,7 @@ impl GBAMemory {
     }
 
     fn write32_internal(&mut self, addr: u32, data: u32) -> u32 {
-        let mut clk: u32 = 0;
-        match addr {
-            // EDGECASE
-            0x00000000..=0x00003FFF => {
-                warn!(
-                    "Attempted to write to BIOS which is Read-Only | {:x?} <- {:x?}",
-                    addr, data
-                );
-                // let index = addr as usize;
-                // self.bios[index] = data;
-                clk = 1;
-            }
-
-            0x02000000..=0x02FFFFFF => {
-                if self.cache.use_ewram {
-                    clk = self.cache.ewram_wait * 2;
-                } else {
-                    clk = 1;
-                }
-            }
-
-            0x03000000..=0x03FFFFFF => {
-                clk = 1;
-            }
-
-            // EDGECASE
-            0x04000000..=0x040003FF => {
-                clk = 1;
-            }
-
-            x if is_imc(x) => {
-                clk = 1;
-            }
-
-            // Unused Mem Areas
-            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
-                warn!("Accessing unused memory addr: {:x?}", addr);
-                clk = 1;
-            }
-
-            _ => {
-                error!("Couldn't write to addr {:x?} from internal memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
 
         let bytes = data.to_le_bytes();
         let _ = self.write8_internal(addr, bytes[0]);
@@ -182,14 +91,10 @@ impl GBAMemory {
 // DISPLAY MEMORY WRITES
 impl GBAMemory {
     fn write8_display(&mut self, addr: u32, data: u8) -> u32 {
-        let mut clk: u32 = 0;
-
         match addr {
             0x05000000..=0x05FFFFFF => {
                 let index = ((addr - 0x05000000) % self.display.palette_ram.len() as u32) as usize;
                 self.display.palette_ram[index] = data;
-
-                clk = 1;
             }
 
             0x06000000..=0x06FFFFFF => {
@@ -201,47 +106,25 @@ impl GBAMemory {
                 };
 
                 self.display.vram[index] = data;
-
-                clk = 1;
             }
 
             0x07000000..=0x07FFFFFF => {
                 let index = ((addr - 0x07000000) % self.display.oam.len() as u32) as usize;
                 self.display.oam[index] = data;
-
-                clk = 1;
             }
 
             _ => {
                 error!("Couldn't write addr {:x?} from display memory", addr)
             }
         }
+
+        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
+
         clk
     }
 
     fn write16_display(&mut self, addr: u32, data: u16) -> u32 {
-        let mut clk: u32 = 0;
-
-        match addr {
-            // bg obj palette ram
-            0x05000000..=0x05FFFFFF => {
-                clk = 1;
-            }
-
-            // vram
-            0x06000000..=0x06FFFFFF => {
-                clk = 1;
-            }
-
-            // oam
-            0x07000000..=0x07FFFFFF => {
-                clk = 1;
-            }
-
-            _ => {
-                error!("Couldn't write addr {:x?} from display memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 2, self.is_sequential(addr));
 
         let bytes = data.to_le_bytes();
         let _ = self.write8_display(addr, bytes[0]);
@@ -251,28 +134,7 @@ impl GBAMemory {
     }
 
     fn write32_display(&mut self, addr: u32, data: u32) -> u32 {
-        let mut clk: u32 = 0;
-
-        match addr {
-            // bg obj palette ram
-            0x05000000..=0x05FFFFFF => {
-                clk = 2;
-            }
-
-            // vram
-            0x06000000..=0x06FFFFFF => {
-                clk = 2;
-            }
-
-            // oam
-            0x07000000..=0x07FFFFFF => {
-                clk = 1;
-            }
-
-            _ => {
-                error!("Couldn't write addr {:x?} from display memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
 
         let bytes = data.to_le_bytes();
         let _ = self.write8_display(addr, bytes[0]);
@@ -287,46 +149,30 @@ impl GBAMemory {
 // EXTERNAL MEMORY WRITES
 impl GBAMemory {
     fn write8_external(&mut self, addr: u32, data: u8) -> u32 {
-        let mut clk: u32 = 0;
-
         match addr {
             0x08000000..=0x0DFFFFFF => {
-                clk = self.get_rom_mirror_clk(addr, 1);
                 warn!("Tried to write to ROM memory");
             }
 
             0x0E000000..=0x0FFFFFFF => {
                 let index = ((addr - 0x0E000000) % self.external.sram.len() as u32) as usize;
                 self.external.sram[index] = data;
-
-                clk = self.cache.sram_wait;
             }
 
             _ => {
                 error!("Couldn't write addr {:x?} from external memory", addr)
             }
         }
+        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
 
         clk
     }
 
     fn write16_external(&mut self, addr: u32, data: u16) -> u32 {
-        let mut clk: u32 = 0;
-
-        match addr {
-            0x08000000..=0x0DFFFFFF => {
-                clk = self.get_rom_mirror_clk(addr, 2);
-                warn!("Tried to write 16bit to ROM memory");
-                return clk;
-            }
-
-            0x0E000000..=0x0FFFFFFF => {
-                clk = self.cache.sram_wait;
-            }
-
-            _ => {
-                error!("Couldn't write addr {:x?} from external memory", addr)
-            }
+        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
+        if (0x08000000u32..=0x0DFFFFFFu32).contains(&addr) {
+            warn!("Tried to write 16bit to ROM memory");
+            return clk;
         }
 
         let bytes = data.to_le_bytes();
@@ -337,20 +183,11 @@ impl GBAMemory {
     }
 
     fn write32_external(&mut self, addr: u32, data: u32) -> u32 {
-        let mut clk: u32 = 0;
+        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
 
-        match addr {
-            0x08000000..=0x0DFFFFFF => {
-                clk = self.get_rom_mirror_clk(addr, 4);
-                warn!("Tried to write 32bit value to ROM");
-                return clk;
-            }
-
-            0x0E000000..=0x0FFFFFFF => clk = self.cache.sram_wait,
-
-            _ => {
-                error!("Couldn't write addr {:x?} from external memory", addr)
-            }
+        if (0x08000000u32..=0x0DFFFFFFu32).contains(&addr) {
+            warn!("Tried to write 32bit to ROM memory");
+            return clk;
         }
 
         let bytes = data.to_le_bytes();

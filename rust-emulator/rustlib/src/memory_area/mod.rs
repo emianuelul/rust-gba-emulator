@@ -2,7 +2,9 @@ mod reads;
 mod writes;
 
 use crate::system_ctrl_registers::{IMC_ADDR, WAITCNT_ADDR};
+use crate::utility_fns::is_imc;
 use std::cell::Cell;
+use tracing::{error, warn};
 
 struct InternalMemory {
     bios: Vec<u8>, // 16Kb      0x00000000 - 0x00003FFF
@@ -96,40 +98,106 @@ impl Cache {
 }
 
 impl GBAMemory {
-    fn get_rom_mirror_clk(&self, addr: u32, bytes: u8) -> u32 {
-        let sequential: bool = addr == self.last_access.get().0 + self.last_access.get().1 as u32
-            && !addr.is_multiple_of(128 * 1024);
-
-        let wait = (addr >> 25) & 3;
-        let (n, s) = match wait {
-            0 => self.cache.ns0_wait,
-
-            1 => self.cache.ns1_wait,
-
-            2 => self.cache.ns2_wait,
-
-            _ => {
-                unreachable!()
-            }
-        };
-
-        if sequential {
-            if bytes == 4 {
-                s * 2
-            } else {
-                s
-            }
-        } else {
-            if bytes == 4 {
-                n + s
-            } else {
-                n
-            }
-        }
-    }
-
     pub fn set_fetched_opcode(&self, opcode: u32) {
         self.fetched_opcode.set(opcode);
+    }
+
+    pub fn is_sequential(&self, addr: u32) -> bool {
+        let (last_addr, last_size) = self.last_access.get();
+        addr == last_addr.wrapping_add(last_size as u32)
+    }
+
+    pub fn get_access_clk(&self, addr: u32, bytes: u32, seq: bool) -> u32 {
+        match addr {
+            // BIOS
+            0x00000000..=0x00003FFF => 1,
+
+            // EWRAM
+            0x02000000..=0x02FFFFFF => {
+                if self.cache.use_ewram {
+                    if bytes == 4 {
+                        self.cache.ewram_wait * 2
+                    } else {
+                        self.cache.ewram_wait
+                    }
+                } else {
+                    1
+                }
+            }
+
+            // IWRAM
+            0x03000000..=0x03FFFFFF => 1,
+
+            // IO REGISTERS
+            0x04000000..=0x040003FF => 1,
+
+            // IMC REGISTER
+            x if is_imc(x) => 1,
+
+            // INTERNAL UNUSED MEM AREAS
+            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => 1,
+
+            // BG OBJ PALETTE RAM
+            0x05000000..=0x05FFFFFF => {
+                if bytes == 4 {
+                    2
+                } else {
+                    1
+                }
+            }
+
+            // VRAM
+            0x06000000..=0x06FFFFFF => {
+                if bytes == 4 {
+                    2
+                } else {
+                    1
+                }
+            }
+
+            // OAM
+            0x07000000..=0x07FFFFFF => 1,
+
+            // GAMEPAK ROM
+            0x08000000..=0x0DFFFFFF => {
+                let sequential: bool = seq && !addr.is_multiple_of(128 * 1024);
+
+                let wait = (addr >> 25) & 3;
+                let (n, s) = match wait {
+                    0 => self.cache.ns0_wait,
+
+                    1 => self.cache.ns1_wait,
+
+                    2 => self.cache.ns2_wait,
+
+                    _ => {
+                        unreachable!()
+                    }
+                };
+
+                if sequential {
+                    if bytes == 4 {
+                        s * 2
+                    } else {
+                        s
+                    }
+                } else {
+                    if bytes == 4 {
+                        n + s
+                    } else {
+                        n
+                    }
+                }
+            }
+
+            // SRAM
+            0x0E000000..=0x0FFFFFFF => self.cache.sram_wait,
+
+            _ => {
+                tracing::error!("Memory addr {:x?} is out of bounds", addr);
+                0
+            }
+        }
     }
 }
 

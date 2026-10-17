@@ -326,28 +326,22 @@ impl Cpu {
     }
 
     #[bitmatch]
-    fn cpu_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) {
+    fn cpu_decode_execute(&mut self, memory: &mut GBAMemory, instruction: u32) -> u32 {
         match self.get_cpu_state() {
-            CPUState::Arm => {
-                self.arm_decode_execute(memory, instruction);
-            }
-            CPUState::Thumb => {
-                self.thumb_decode_execute(memory, instruction);
-            }
+            CPUState::Arm => self.arm_decode_execute(memory, instruction),
+            CPUState::Thumb => self.thumb_decode_execute(memory, instruction),
         }
     }
 }
 
 // Step Logic
-// TODO: Revisit after waitcnt
 // m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
 impl Cpu {
     #[bitmatch]
     pub fn step(&mut self, memory: &mut GBAMemory) -> u32 {
-        let (instruction, clk) = self.cpu_fetch(memory);
-        self.cpu_decode_execute(memory, instruction);
+        let (instruction, mut clk) = self.cpu_fetch(memory);
+        clk += self.cpu_decode_execute(memory, instruction);
 
-        // stubbed clk
         clk
     }
 }

@@ -6,7 +6,6 @@ use tracing::{error, warn};
 impl GBAMemory {
     fn read8_internal(&self, addr: u32) -> (u8, u32) {
         let mut data: u8 = 0;
-        let mut clk: u32 = 0;
         match addr {
             // EDGECASE
             0x00000000..=0x00003FFF => {
@@ -14,7 +13,6 @@ impl GBAMemory {
                 match self.internal.bios.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = 1;
                     }
                     None => error!("Couldn't read addr {:x?} from BIOS", addr),
                 }
@@ -27,7 +25,6 @@ impl GBAMemory {
                     match self.internal.wram_on_board.get(index) {
                         Some(&value) => {
                             data = value;
-                            clk = self.cache.ewram_wait;
                         }
                         None => error!("Couldn't read addr {:x?} from On-Board WRAM", addr),
                     }
@@ -38,7 +35,6 @@ impl GBAMemory {
                     match self.internal.wram_on_chip.get(index) {
                         Some(&value) => {
                             data = value;
-                            clk = 1;
                         }
                         None => error!("Couldn't read addr {:x?} from MIRRORED OnChip WRAM", addr),
                     }
@@ -51,7 +47,6 @@ impl GBAMemory {
                 match self.internal.wram_on_chip.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = 1;
                     }
                     None => error!("Couldn't read addr {:x?} from On-Chip WRAM", addr),
                 }
@@ -63,7 +58,6 @@ impl GBAMemory {
                 match self.internal.io_registers.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = 1;
                     }
                     None => error!("Couldn't read addr {:x?} from I/O Registers", addr),
                 }
@@ -74,7 +68,6 @@ impl GBAMemory {
                 match self.internal.imc.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = 1;
                     }
                     None => error!("Couldn't read byte for IMC"),
                 }
@@ -85,13 +78,14 @@ impl GBAMemory {
                 warn!("Accessing unused memory addr: {:x?}", addr);
                 let raw_data = self.fetched_opcode.get();
                 data = (raw_data >> ((addr & 3) * 8)) as u8;
-                clk = 1;
             }
 
             _ => {
                 error!("Couldn't read addr {:x?} from internal memory", addr)
             }
         }
+
+        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
 
         (data, clk)
     }
@@ -100,46 +94,7 @@ impl GBAMemory {
         let first = self.read8_internal(addr).0 as u16;
         let second = self.read8_internal(addr + 1).0 as u16;
 
-        let mut clk: u32 = 0;
-        match addr {
-            // bios
-            0x00000000..=0x00003FFF => {
-                clk = 1;
-            }
-
-            // wram onboard
-            0x02000000..=0x02FFFFFF => {
-                if self.cache.use_ewram {
-                    clk = self.cache.ewram_wait;
-                } else {
-                    clk = 1;
-                }
-            }
-
-            // wram onchip
-            0x03000000..=0x03FFFFFF => {
-                clk = 1;
-            }
-
-            // io registers
-            0x04000000..=0x040003FF => {
-                clk = 1;
-            }
-
-            x if is_imc(x) => {
-                clk = 1;
-            }
-
-            // Unused Mem Areas
-            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
-                warn!("Accessing unused memory addr: {:x?}", addr);
-                clk = 1;
-            }
-
-            _ => {
-                error!("Couldn't read addr {:x?} from internal memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 2, self.is_sequential(addr));
 
         (first | (second << 8), clk)
     }
@@ -148,44 +103,7 @@ impl GBAMemory {
         let first = self.read16_internal(addr).0 as u32;
         let second = self.read16_internal(addr + 2).0 as u32;
 
-        let mut clk: u32 = 0;
-        match addr {
-            // EDGECASE
-            0x00000000..=0x00003FFF => {
-                clk = 1;
-            }
-
-            0x02000000..=0x02FFFFFF => {
-                if self.cache.use_ewram {
-                    clk = self.cache.ewram_wait * 2;
-                } else {
-                    clk = 1;
-                }
-            }
-
-            0x03000000..=0x03FFFFFF => {
-                clk = 1;
-            }
-
-            // EDGECASE
-            0x04000000..=0x040003FF => {
-                clk = 1;
-            }
-
-            x if is_imc(x) => {
-                clk = 1;
-            }
-
-            // Unused Mem Areas
-            0x00004000..=0x01FFFFFF | 0x04000400..=0x04FFFFFF => {
-                warn!("Accessing unused memory addr: {:x?}", addr);
-                clk = 1;
-            }
-
-            _ => {
-                error!("Couldn't read addr {:x?} from internal memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
 
         (first | (second << 16), clk)
     }
@@ -196,7 +114,6 @@ impl GBAMemory {
 impl GBAMemory {
     fn read8_display(&self, addr: u32) -> (u8, u32) {
         let mut data: u8 = 0;
-        let mut clk: u32 = 0;
 
         match addr {
             0x05000000..=0x05FFFFFF => {
@@ -204,7 +121,6 @@ impl GBAMemory {
                 match self.display.palette_ram.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = 1;
                     }
                     None => {
                         error!("Couldn't read addr {:x?} from BG / OBJ Palette RAM", addr)
@@ -223,7 +139,6 @@ impl GBAMemory {
                 match self.display.vram.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = 1;
                     }
                     None => error!("Couln't read addr {:x?} from VRAM", addr),
                 }
@@ -234,7 +149,6 @@ impl GBAMemory {
                 match self.display.oam.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = 1;
                     }
                     None => error!("Couldn't read addr {:x?} from OAM", addr),
                 }
@@ -244,6 +158,9 @@ impl GBAMemory {
                 error!("Couldn't read addr {:x?} from display memory", addr)
             }
         }
+
+        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
+
         (data, clk)
     }
 
@@ -251,27 +168,7 @@ impl GBAMemory {
         let first = self.read8_display(addr).0 as u16;
         let second = self.read8_display(addr + 1).0 as u16;
 
-        let mut clk: u32 = 0;
-        match addr {
-            // bg obj palette ram
-            0x05000000..=0x05FFFFFF => {
-                clk = 1;
-            }
-
-            // vram
-            0x06000000..=0x06FFFFFF => {
-                clk = 1;
-            }
-
-            // oam
-            0x07000000..=0x07FFFFFF => {
-                clk = 1;
-            }
-
-            _ => {
-                error!("Couldn't read addr {:x?} from display memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 2, self.is_sequential(addr));
 
         (first | (second << 8), clk)
     }
@@ -280,27 +177,7 @@ impl GBAMemory {
         let first = self.read16_display(addr).0 as u32;
         let second = self.read16_display(addr + 2).0 as u32;
 
-        let mut clk: u32 = 0;
-        match addr {
-            // bg obj palette ram
-            0x05000000..=0x05FFFFFF => {
-                clk = 2;
-            }
-
-            // vram
-            0x06000000..=0x06FFFFFF => {
-                clk = 2;
-            }
-
-            // oam
-            0x07000000..=0x07FFFFFF => {
-                clk = 1;
-            }
-
-            _ => {
-                error!("Couldn't read addr {:x?} from display memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
 
         (first | (second << 16), clk)
     }
@@ -311,12 +188,10 @@ impl GBAMemory {
 impl GBAMemory {
     fn read8_external(&self, addr: u32) -> (u8, u32) {
         let mut data: u8 = 0;
-        let mut clk: u32 = 0;
 
         match addr {
             0x08000000..=0x0DFFFFFF => {
                 let offset = (addr & 0x01FFFFFF) as usize;
-                clk = self.get_rom_mirror_clk(addr, 1);
                 data = match self.external.rom.get(offset) {
                     Some(&value) => value,
                     None => (((addr >> 1) & 0xFFFF) >> ((addr & 1) * 8)) as u8,
@@ -328,7 +203,6 @@ impl GBAMemory {
                 match self.external.sram.get(index) {
                     Some(&value) => {
                         data = value;
-                        clk = self.cache.sram_wait;
                     }
                     None => error!("Couldn't read addr {:x?} from GamePak SRAM", addr),
                 }
@@ -339,6 +213,8 @@ impl GBAMemory {
             }
         }
 
+        let clk: u32 = self.get_access_clk(addr, 1, self.is_sequential(addr));
+
         (data, clk)
     }
 
@@ -346,21 +222,7 @@ impl GBAMemory {
         let first = self.read8_external(addr).0 as u16;
         let second = self.read8_external(addr + 1).0 as u16;
 
-        let mut clk: u32 = 0;
-        match addr {
-            0x08000000..=0x0DFFFFFF => {
-                clk = self.get_rom_mirror_clk(addr, 2);
-            }
-
-            0x0E000000..=0x0FFFFFFF => {
-                warn!("Reading 16bit value from FLASH memory");
-                clk = self.cache.sram_wait;
-            }
-
-            _ => {
-                error!("Couldn't read addr {:x?} from external memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 2, self.is_sequential(addr));
 
         (first | (second << 8), clk)
     }
@@ -369,21 +231,7 @@ impl GBAMemory {
         let first = self.read16_external(addr).0 as u32;
         let second = self.read16_external(addr + 2).0 as u32;
 
-        let mut clk: u32 = 0;
-        match addr {
-            0x08000000..=0x0DFFFFFF => {
-                clk = self.get_rom_mirror_clk(addr, 4);
-            }
-
-            0x0E000000..=0x0FFFFFFF => {
-                warn!("Reading 32bit value from FLASH memory");
-                clk = self.cache.sram_wait;
-            }
-
-            _ => {
-                error!("Couldn't read addr {:x?} from external memory", addr)
-            }
-        }
+        let clk: u32 = self.get_access_clk(addr, 4, self.is_sequential(addr));
 
         (first | (second << 16), clk)
     }
