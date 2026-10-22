@@ -81,6 +81,24 @@ impl Default for Cpu {
     }
 }
 
+impl Cpu {
+    fn refill(&mut self, mem: &GBAMemory, addr: u32) -> u32 {
+        let addr = match self.get_cpu_state() {
+            CPUState::Arm => addr & !3,
+            CPUState::Thumb => addr & !1,
+        };
+        self.set_register_value(PC, addr);
+        match self.get_cpu_state() {
+            CPUState::Arm => mem
+                .get_access_clk(addr, 4, false)
+                .wrapping_add(mem.get_access_clk(addr.wrapping_add(4), 4, true)),
+            CPUState::Thumb => mem
+                .get_access_clk(addr, 2, false)
+                .wrapping_add(mem.get_access_clk(addr.wrapping_add(2), 2, true)),
+        }
+    }
+}
+
 // Registers I/O
 impl Cpu {
     pub fn set_register_value(&mut self, index: usize, data: u32) {

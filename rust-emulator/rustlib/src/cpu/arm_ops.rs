@@ -18,15 +18,14 @@ impl Cpu {
                 // B / BL
                 "????_101_o_nnnnnnnnnnnnnnnnnnnnnnnn" => {
                     self.b_execute_op(o as u8, n);
-
-                    clk += memory.cache.ns0_wait.0 * 2;
+                    self.refill(memory, self.get_register_value(PC));
                 }
 
                 // BX
                 "????_0001_0010_1111_1111_1111_0001_nnnn" => {
                     self.b_execute_bx(n as u8);
 
-                    clk += memory.cache.ns0_wait.0 * 2;
+                    self.refill(memory, self.get_register_value(PC));
                 }
 
                 // SWI
@@ -78,7 +77,7 @@ impl Cpu {
                     );
 
                     if rd == PC && !(0x8u32..=0xBu32).contains(&o) {
-                        clk += memory.cache.ns0_wait.0;
+                        self.refill(memory, self.get_register_value(PC));
                     }
                 }
 
@@ -104,7 +103,7 @@ impl Cpu {
                     );
 
                     if rd == PC && !(0x8u32..=0xBu32).contains(&o) {
-                        clk += memory.cache.ns0_wait.0;
+                        self.refill(memory, self.get_register_value(PC));
                     }
 
                     // (1+p)S+rI+pN
@@ -131,15 +130,19 @@ impl Cpu {
                         (carry_in, shift_carry),
                     );
 
-                    clk += 1;
                     if rd == PC && !(0x8u32..=0xBu32).contains(&o) {
-                        clk += memory.cache.ns0_wait.0;
+                        self.refill(memory, self.get_register_value(PC));
                     }
                 }
 
                 // SWP
                 "????_00010_b_00_nnnn_dddd_00001001_mmmm" => {
                     self.swp_execute(memory, b as u8, n as usize, d as usize, m as usize);
+
+                    if d as usize == PC {
+                        self.refill(memory, self.get_register_value(d as usize));
+                    }
+
                     clk += memory.cache.ns0_wait.0 * 2 + 1;
                 }
 
@@ -174,6 +177,10 @@ impl Cpu {
                         [p as u8, u as u8, b as u8, x as u8],
                         imm as u32,
                     );
+
+                    if d as usize == PC && o == 1 {
+                        self.refill(memory, self.get_register_value(PC));
+                    }
                 }
 
                 // SDT - LDR STR (i = 1) (shifted immediate offset)
@@ -197,6 +204,10 @@ impl Cpu {
                             [p as u8, u as u8, b as u8, x as u8],
                             operand,
                         );
+
+                        if d as usize == PC && o == 1 {
+                            self.refill(memory, self.get_register_value(PC));
+                        }
                     };
                 }
 
@@ -225,6 +236,10 @@ impl Cpu {
                         o as u8,
                         offset,
                     );
+
+                    if d as usize == PC && l == 1 {
+                        self.refill(memory, self.get_register_value(PC));
+                    }
                 }
 
                 // Block Data Transfer (LDM, STM)
@@ -246,6 +261,10 @@ impl Cpu {
                         [p as u8, u as u8, s as u8, w as u8],
                         n as usize,
                     );
+
+                    if rlist.contains(&PC) && o == 1 {
+                        self.refill(memory, self.get_register_value(PC));
+                    }
                 }
 
                 _ => {
