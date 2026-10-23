@@ -18,14 +18,15 @@ impl Cpu {
                 // B / BL
                 "????_101_o_nnnnnnnnnnnnnnnnnnnnnnnn" => {
                     self.b_execute_op(o as u8, n);
-                    self.refill(memory, self.get_register_value(PC));
+
+                    clk += self.get_refill_clk(memory, self.get_register_value(PC))
                 }
 
                 // BX
                 "????_0001_0010_1111_1111_1111_0001_nnnn" => {
                     self.b_execute_bx(n as u8);
 
-                    self.refill(memory, self.get_register_value(PC));
+                    clk += self.get_refill_clk(memory, self.get_register_value(PC))
                 }
 
                 // SWI
@@ -77,7 +78,7 @@ impl Cpu {
                     );
 
                     if rd == PC && !(0x8u32..=0xBu32).contains(&o) {
-                        self.refill(memory, self.get_register_value(PC));
+                        clk += self.get_refill_clk(memory, self.get_register_value(PC));
                     }
                 }
 
@@ -103,10 +104,8 @@ impl Cpu {
                     );
 
                     if rd == PC && !(0x8u32..=0xBu32).contains(&o) {
-                        self.refill(memory, self.get_register_value(PC));
+                        clk += self.get_refill_clk(memory, self.get_register_value(PC));
                     }
-
-                    // (1+p)S+rI+pN
                 }
 
                 // alu (i = 0, r = 1)
@@ -131,19 +130,19 @@ impl Cpu {
                     );
 
                     if rd == PC && !(0x8u32..=0xBu32).contains(&o) {
-                        self.refill(memory, self.get_register_value(PC));
+                        clk += self.get_refill_clk(memory, self.get_register_value(PC));
                     }
+                    clk += 1;
                 }
 
                 // SWP
                 "????_00010_b_00_nnnn_dddd_00001001_mmmm" => {
-                    self.swp_execute(memory, b as u8, n as usize, d as usize, m as usize);
+                    clk += self.swp_execute(memory, b as u8, n as usize, d as usize, m as usize);
+                    clk += 1;
 
                     if d as usize == PC {
-                        self.refill(memory, self.get_register_value(d as usize));
+                        clk += self.get_refill_clk(memory, self.get_register_value(PC));
                     }
-
-                    clk += memory.cache.ns0_wait.0 * 2 + 1;
                 }
 
                 // Multiply & Multiply-Accumulate
@@ -154,11 +153,7 @@ impl Cpu {
                     let rs = f as u8;
                     let rm = m as u8;
 
-                    self.mul_execute_op(op, rd, rn, rs, rm, s as u8);
-
-                    // MUL - 1S + mI
-                    // MLA + MULL (UMULL, SMULL) - 1S + (m+1)I
-                    // MLAL (UMLAL, SMLAL) - 1S + (m+2)I
+                    clk += self.mul_execute_op(op, rd, rn, rs, rm, s as u8);
                 }
 
                 // SDT - LDR, STR (i = 0) (immediate offset)
@@ -169,7 +164,7 @@ impl Cpu {
                         i as i32
                     };
 
-                    self.sdt_execute_op(
+                    clk += self.sdt_execute_op(
                         memory,
                         n as usize,
                         d as usize,
@@ -179,7 +174,11 @@ impl Cpu {
                     );
 
                     if d as usize == PC && o == 1 {
-                        self.refill(memory, self.get_register_value(PC));
+                        clk += self.get_refill_clk(memory, self.get_register_value(PC));
+                    }
+
+                    if o == 1 {
+                        clk += 1;
                     }
                 }
 
@@ -196,7 +195,7 @@ impl Cpu {
                             shifted as i32
                         } as u32;
 
-                        self.sdt_execute_op(
+                        clk += self.sdt_execute_op(
                             memory,
                             n as usize,
                             d as usize,
@@ -206,7 +205,11 @@ impl Cpu {
                         );
 
                         if d as usize == PC && o == 1 {
-                            self.refill(memory, self.get_register_value(PC));
+                            clk += self.get_refill_clk(memory, self.get_register_value(PC));
+                        }
+
+                        if o == 1 {
+                            clk += 1;
                         }
                     };
                 }
@@ -228,7 +231,7 @@ impl Cpu {
                         }
                     };
 
-                    self.hsdt_execute_op(
+                    clk += self.hsdt_execute_op(
                         memory,
                         [p as u8, u as u8, w as u8, l as u8],
                         n as usize,
@@ -238,7 +241,11 @@ impl Cpu {
                     );
 
                     if d as usize == PC && l == 1 {
-                        self.refill(memory, self.get_register_value(PC));
+                        clk += self.get_refill_clk(memory, self.get_register_value(PC));
+                    }
+
+                    if l == 1 {
+                        clk += 1;
                     }
                 }
 
@@ -254,7 +261,7 @@ impl Cpu {
                         }
                     }
 
-                    self.bdt_execute_op(
+                    clk += self.bdt_execute_op(
                         memory,
                         &mut rlist,
                         o as u8,
@@ -263,7 +270,11 @@ impl Cpu {
                     );
 
                     if rlist.contains(&PC) && o == 1 {
-                        self.refill(memory, self.get_register_value(PC));
+                        clk += self.get_refill_clk(memory, self.get_register_value(PC));
+                    }
+
+                    if o == 1 {
+                        clk += 1;
                     }
                 }
 
@@ -271,8 +282,6 @@ impl Cpu {
                     error!("Invalid ARM instruction detected: {:b}", instruction);
                 }
             }
-        } else {
-            clk += 1;
         }
 
         clk
@@ -293,8 +302,6 @@ impl Cpu {
                 .wrapping_add(4)
                 .wrapping_add(self.b_convert_u24_to_i32(n) * 4))
                 as u32;
-
-            // 2S + 1N
         } else {
             // BL
             tracing::debug!("ARM: BL #{:08X}", n);
@@ -303,8 +310,6 @@ impl Cpu {
                 .wrapping_add(4)
                 .wrapping_add(self.b_convert_u24_to_i32(n) * 4))
                 as u32;
-
-            // 2S + 1N
         }
     }
 
@@ -312,7 +317,6 @@ impl Cpu {
         tracing::debug!("ARM: BX R{}", n);
         if n == 15 {
             self.registers.pc = self.registers.pc.wrapping_add(4);
-            // 2S + 1N
         }
 
         let register_value = self.get_register_value(n as usize);
@@ -324,8 +328,6 @@ impl Cpu {
             self.set_cpsr_bit(T_FLAG, 0);
             self.registers.pc = register_value & !3;
         }
-
-        // 2S + 1N
     }
 }
 
@@ -780,12 +782,26 @@ impl Cpu {
 
 // ARM MUL Logic
 impl Cpu {
+    fn mul_get_m(&self, value: u32, signed: bool) -> u32 {
+        let count = if signed {
+            value.leading_ones().max(value.leading_zeros())
+        } else {
+            value.leading_zeros()
+        };
+
+        match count {
+            24..=32 => 1,
+            16..24 => 2,
+            8..16 => 3,
+            _ => 4,
+        }
+    }
+
     fn mul_execute_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
         let rs_value = self.get_register_value(rs as usize);
         let rm_value = self.get_register_value(rm as usize);
 
-        // rd > RdHi
-        // rn > RdLo
+        let signed = !matches!(op, 0b0100 | 0b0101);
 
         match op {
             // MUL
@@ -806,9 +822,9 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
+                let m = self.mul_get_m(rs_value, signed);
 
-                // 1S + mI
-                0
+                m
             }
 
             // MLA
@@ -831,9 +847,9 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
+                let m = self.mul_get_m(rs_value, signed);
 
-                // 1S + (m + 1)I
-                0
+                m + 1
             }
 
             // UMULL
@@ -858,9 +874,9 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
+                let m = self.mul_get_m(rs_value, signed);
 
-                // 1S + (m + 1)I
-                0
+                m + 1
             }
 
             // UMLAL
@@ -890,9 +906,9 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
+                let m = self.mul_get_m(rs_value, signed);
 
-                // 1S + (m+2)I
-                0
+                m + 2
             }
 
             // SMULL
@@ -917,9 +933,9 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
+                let m = self.mul_get_m(rs_value, signed);
 
-                // 1S + (m+1)I
-                0
+                m + 1
             }
 
             // SMLAL
@@ -951,9 +967,9 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
+                let m = self.mul_get_m(rs_value, signed);
 
-                // 1S + (m+2)I
-                0
+                m + 2
             }
             _ => {
                 error!("Unsupported MUL opcode: {:b}", op);

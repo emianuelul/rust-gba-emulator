@@ -82,7 +82,8 @@ impl Default for Cpu {
 }
 
 impl Cpu {
-    fn refill(&mut self, mem: &GBAMemory, addr: u32) -> u32 {
+    #[must_use]
+    fn get_refill_clk(&mut self, mem: &GBAMemory, addr: u32) -> u32 {
         let addr = match self.get_cpu_state() {
             CPUState::Arm => addr & !3,
             CPUState::Thumb => addr & !1,
