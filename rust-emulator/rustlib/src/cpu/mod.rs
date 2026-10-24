@@ -86,12 +86,20 @@ impl Default for Cpu {
 impl Cpu {
     #[must_use]
     fn get_refill_clk(&mut self, mem: &GBAMemory, addr: u32) -> u32 {
-        let addr = match self.get_cpu_state() {
+        let cpu_state = self.get_cpu_state();
+
+        let addr = match cpu_state {
             CPUState::Arm => addr & !3,
             CPUState::Thumb => addr & !1,
         };
         self.set_register_value(PC, addr);
-        match self.get_cpu_state() {
+
+        match cpu_state {
+            CPUState::Arm => mem.set_last_access(addr.wrapping_sub(4), 4),
+            CPUState::Thumb => mem.set_last_access(addr.wrapping_sub(2), 2),
+        }
+
+        match cpu_state {
             CPUState::Arm => mem
                 .get_access_clk(addr, 4, false)
                 .wrapping_add(mem.get_access_clk(addr.wrapping_add(4), 4, true)),

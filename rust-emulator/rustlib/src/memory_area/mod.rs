@@ -107,6 +107,10 @@ impl GBAMemory {
         addr == last_addr.wrapping_add(last_size as u32)
     }
 
+    pub fn set_last_access(&self, addr: u32, bytes: u8) {
+        self.last_access.set((addr, bytes));
+    }
+
     pub fn get_access_clk(&self, addr: u32, bytes: u32, seq: bool) -> u32 {
         match addr {
             // BIOS
