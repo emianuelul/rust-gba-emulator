@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use tracing::{error, warn};
 
 mod arm_ops;
+mod arm_timing_tests;
 mod thumb_ops;
+mod thumb_timing_tests;
 
 // REMINDER: PC IS ADVANCED AFTER FETCH; OPERATIONS USE, BASICALLY, THE OLD PC
 

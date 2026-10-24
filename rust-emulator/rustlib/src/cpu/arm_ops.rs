@@ -1,6 +1,7 @@
 use super::{CPUMode, Cpu};
 use crate::constants::*;
 use crate::memory_area::*;
+use crate::utility_fns::mul_get_m;
 use bitmatch::bitmatch;
 use tracing::{error, warn};
 
@@ -782,21 +783,6 @@ impl Cpu {
 
 // ARM MUL Logic
 impl Cpu {
-    fn mul_get_m(&self, value: u32, signed: bool) -> u32 {
-        let count = if signed {
-            value.leading_ones().max(value.leading_zeros())
-        } else {
-            value.leading_zeros()
-        };
-
-        match count {
-            24..=32 => 1,
-            16..24 => 2,
-            8..16 => 3,
-            _ => 4,
-        }
-    }
-
     fn mul_execute_op(&mut self, op: u8, rd: u8, rn: u8, rs: u8, rm: u8, s: u8) -> u32 {
         let rs_value = self.get_register_value(rs as usize);
         let rm_value = self.get_register_value(rm as usize);
@@ -822,9 +808,8 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
-                let m = self.mul_get_m(rs_value, signed);
 
-                m
+                mul_get_m(rs_value, signed)
             }
 
             // MLA
@@ -847,7 +832,7 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
-                let m = self.mul_get_m(rs_value, signed);
+                let m = mul_get_m(rs_value, signed);
 
                 m + 1
             }
@@ -874,7 +859,7 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
-                let m = self.mul_get_m(rs_value, signed);
+                let m = mul_get_m(rs_value, signed);
 
                 m + 1
             }
@@ -906,7 +891,7 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
-                let m = self.mul_get_m(rs_value, signed);
+                let m = mul_get_m(rs_value, signed);
 
                 m + 2
             }
@@ -933,7 +918,7 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
-                let m = self.mul_get_m(rs_value, signed);
+                let m = mul_get_m(rs_value, signed);
 
                 m + 1
             }
@@ -967,7 +952,7 @@ impl Cpu {
                     self.set_cpsr_bit(Z_FLAG, z_bit);
                     self.set_cpsr_bit(N_FLAG, n_bit);
                 }
-                let m = self.mul_get_m(rs_value, signed);
+                let m = mul_get_m(rs_value, signed);
 
                 m + 2
             }
