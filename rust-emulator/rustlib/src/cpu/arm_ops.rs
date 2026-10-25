@@ -381,7 +381,7 @@ impl Cpu {
 
         let rn_value = rn.1;
 
-        let s: u8 = if s == 1 && rd == 15 {
+        let s: u8 = if s == 1 && rd == 15 && !matches!(opcode, 0x8..=0xB) {
             if mode != CPUMode::Sys && mode != CPUMode::User {
                 self.cpsr = if let Some(&value) = self.spsr.get(&mode) {
                     value
@@ -565,7 +565,7 @@ impl Cpu {
                         self.set_cpsr_bit(C_FLAG, c);
                     }
                 } else if s == 1 && rd == 15 {
-                    warn!("TSTP in User/Sys mode (not allowed)");
+                    warn!("TSTP in User/Sys mode (not allowed) - IGNORING");
                 }
             }
 
@@ -580,7 +580,7 @@ impl Cpu {
                         self.set_cpsr_bit(C_FLAG, c);
                     }
                 } else if s == 1 && rd == 15 {
-                    warn!("TEQP in User/Sys mode (not allowed)")
+                    warn!("TEQP in User/Sys mode (not allowed) - IGNORING")
                 }
             }
 
@@ -597,7 +597,7 @@ impl Cpu {
                     self.set_cpsr_bit(C_FLAG, c_bit);
                     self.set_cpsr_bit(V_FLAG, v_bit);
                 } else if s == 1 && rd == 15 {
-                    warn!("CMPP in User/Sys mode (not allowed)")
+                    warn!("CMPP in User/Sys mode (not allowed) - IGNORING")
                 }
             }
 
@@ -614,7 +614,7 @@ impl Cpu {
                     self.set_cpsr_bit(C_FLAG, c_bit);
                     self.set_cpsr_bit(V_FLAG, v_bit);
                 } else if s == 1 && rd == 15 {
-                    warn!("CMNP in User/Sys mode (not allowed)")
+                    warn!("CMNP in User/Sys mode (not allowed) - IGNORING")
                 }
             }
 

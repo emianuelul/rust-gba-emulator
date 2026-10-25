@@ -4,6 +4,7 @@ pub mod display_registers;
 pub mod gba_emulator;
 mod memory_area;
 pub mod ppu_module;
+pub mod register_macro;
 pub mod system_ctrl_registers;
 pub mod utility_fns;
 

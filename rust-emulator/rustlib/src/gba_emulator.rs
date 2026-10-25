@@ -6,21 +6,30 @@ pub struct GBAEngine {
     memory: GBAMemory,
     cpu: Cpu,
     ppu: PPU,
+    pending_clk: u32,
 }
 
 impl GBAEngine {
     pub fn new(rom_data: Vec<u8>) -> Self {
-        GBAEngine {
+        let mut engine = GBAEngine {
             memory: GBAMemory::new(rom_data),
             cpu: Cpu::new(),
             ppu: PPU::new(),
-        }
+            pending_clk: 0,
+        };
+
+        // init first 2 fetches
+        engine.pending_clk = engine
+            .cpu
+            .get_refill_clk(&engine.memory, engine.cpu.registers.pc);
+
+        engine
     }
 }
 
 impl GBAEngine {
     pub fn step(&mut self) {
-        let clk = self.cpu.step(&mut self.memory);
+        let clk = std::mem::take(&mut self.pending_clk) + self.cpu.step(&mut self.memory);
         self.ppu.step(&mut self.memory, clk);
     }
 }

@@ -28,3 +28,17 @@ pub fn mul_get_m(value: u32, signed: bool) -> u32 {
         _ => 4,
     }
 }
+
+pub fn get_bit(data: u32, pos: usize) -> u8 {
+    ((data >> pos) & 1) as u8
+}
+
+pub fn get_field_bits(raw: u32, (start, len): (usize, usize)) -> u32 {
+    let mut field_value: u32 = 0;
+    for i in (0..len).rev() {
+        let offset = start + i;
+        let bit = get_bit(raw, offset as usize);
+        field_value = (field_value << 1) | (bit as u32);
+    }
+    field_value
+}

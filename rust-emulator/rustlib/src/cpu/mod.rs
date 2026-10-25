@@ -85,7 +85,7 @@ impl Default for Cpu {
 
 impl Cpu {
     #[must_use]
-    fn get_refill_clk(&mut self, mem: &GBAMemory, addr: u32) -> u32 {
+    pub fn get_refill_clk(&mut self, mem: &GBAMemory, addr: u32) -> u32 {
         let cpu_state = self.get_cpu_state();
 
         let addr = match cpu_state {
@@ -95,8 +95,8 @@ impl Cpu {
         self.set_register_value(PC, addr);
 
         match cpu_state {
-            CPUState::Arm => mem.set_last_access(addr.wrapping_sub(4), 4),
-            CPUState::Thumb => mem.set_last_access(addr.wrapping_sub(2), 2),
+            CPUState::Arm => mem.set_last_access(addr.wrapping_add(4), 4),
+            CPUState::Thumb => mem.set_last_access(addr.wrapping_add(2), 2),
         }
 
         match cpu_state {
@@ -339,17 +339,19 @@ impl Cpu {
         let pc = self.get_register_value(PC);
         match self.get_cpu_state() {
             CPUState::Arm => {
-                let (instruction, read) = memory.read32(pc);
-                memory.set_fetched_opcode(memory.peek32(pc.wrapping_add(8)));
-                self.registers.pc = self.registers.pc.wrapping_add(4);
-                (instruction, read)
+                let instruction = memory.peek32(pc);
+                let (next, clk) = memory.read32(pc.wrapping_add(8));
+                memory.set_fetched_opcode(next);
+                self.registers.pc = pc.wrapping_add(4);
+                (instruction, clk)
             }
             CPUState::Thumb => {
-                let (instruction, read) = memory.read16(pc);
-                let h = memory.peek16(pc.wrapping_add(4)) as u32;
+                let instruction = memory.peek16(pc) as u32;
+                let (next, clk) = memory.read16(pc.wrapping_add(4));
+                let h = next as u32;
                 memory.set_fetched_opcode(h | (h << 16));
-                self.registers.pc = self.registers.pc.wrapping_add(2);
-                (instruction as u32, read)
+                self.registers.pc = pc.wrapping_add(2);
+                (instruction, clk)
             }
         }
     }
@@ -364,7 +366,6 @@ impl Cpu {
 }
 
 // Step Logic
-// m=1 for Bit 31-8, m=2 for Bit 31-16, m=3 for Bit 31-24, and m=4 otherwise
 impl Cpu {
     #[bitmatch]
     pub fn step(&mut self, memory: &mut GBAMemory) -> u32 {

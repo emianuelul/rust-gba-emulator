@@ -129,7 +129,7 @@ mod tests {
 
         let expected = mem.get_access_clk(b, 2, true)
             + mem.get_access_clk(b, 2, false)
-            + mem.get_access_clk(b + 2, 2, true);
+            + mem.get_access_clk(b + 4, 2, true);
 
         let c = steps(&mut cpu, &mut mem, 3);
 
