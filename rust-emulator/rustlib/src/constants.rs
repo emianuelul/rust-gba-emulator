@@ -12,7 +12,10 @@ pub const FIQ_FLAG: usize = 6;
 pub const T_FLAG: usize = 5;
 
 pub const SCANLINE_CYCLES: u32 = 1232;
+pub const HDRAW_PIXELS: u8 = 240;
 pub const HDRAW_CYCLES: u32 = 960;
-pub const SCANLINES_PER_FRAME: u32 = 160;
-pub const VDRAW_LINES: u32 = 160;
-pub const VBLANK_LINES: u32 = 228;
+pub const SCANLINES_PER_FRAME: u8 = 160;
+pub const VDRAW_LINES: u8 = 160;
+pub const VBLANK_LINES: u8 = 68;
+
+pub const VRAM_START: u32 = 0x0600_0000;

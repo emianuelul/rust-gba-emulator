@@ -42,6 +42,7 @@ impl Field for u32 {
 #[macro_export]
 macro_rules! register {
     ($name:ident : $raw:ty {$($field_name:ident : $field_type:ty => $tuple:expr),* $(,)?}) => {
+        #[derive(Copy, Clone)]
         pub struct $name {
             $(pub $field_name: $field_type),*
         }

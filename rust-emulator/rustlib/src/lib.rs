@@ -1,6 +1,7 @@
 pub mod constants;
 mod cpu;
 pub mod display_registers;
+mod display_test;
 pub mod gba_emulator;
 mod memory_area;
 pub mod ppu_module;
@@ -24,7 +25,7 @@ mod tests {
     }
 
     #[test]
-    fn tests() {
+    fn cpu_tests() {
         init_tracing();
 
         let test = 5;

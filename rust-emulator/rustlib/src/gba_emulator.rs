@@ -27,9 +27,24 @@ impl GBAEngine {
     }
 }
 
+pub struct Result {
+    pub draw: bool,
+    pub screen: [u32; 240 * 160],
+}
+
 impl GBAEngine {
-    pub fn step(&mut self) {
+    pub fn step(&mut self) -> Result {
+        let mut screen: [u32; 240 * 160] = [0; 240 * 160];
+        let mut draw = false;
+
         let clk = std::mem::take(&mut self.pending_clk) + self.cpu.step(&mut self.memory);
-        self.ppu.step(&mut self.memory, clk);
+        if self.ppu.step(&mut self.memory, clk) {
+            //println!("====== DRAWING FRAME ======");
+            //println!("{:?}", self.ppu.get_frame());
+            draw = true;
+            screen = self.ppu.get_frame();
+        }
+
+        Result { draw, screen }
     }
 }
