@@ -17,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build --verbose
+      run: cd rust-emulator && cd rustlib && cargo build --verbose
 
   opcode-tests:
 
@@ -25,6 +25,6 @@ jobs:
 
     steps:
     - name: ARM Tests
-      run: cargo test --lib cpu::arm_opcode_tests
+      run: cd rust-emulator && cd rustlib && cargo test --lib cpu::arm_opcode_tests
     - name: THUMB Tests
-      run: cargo test --lib cpu::thumb_opcode_tests
+      run: cd rust-emulator && cd rustlib && cargo test --lib cpu::thumb_opcode_tests
