@@ -1,5 +1,8 @@
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [package]
-name = "rustlib"
+name = "gba-core"
 version = "0.1.0"
 edition = "2024"
 
@@ -8,3 +11,5 @@ tracing = "0.1.44"
 tracing-subscriber = {version = "0.3.23", features = ["env-filter"]}
 tracing-wasm = "0.2.1"
 bitmatch = "0.1.1"
+wasm-bindgen = "0.2.129"
+serde = { version = "1.0.229", features = ["derive"]}

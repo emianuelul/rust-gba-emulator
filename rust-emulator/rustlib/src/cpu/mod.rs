@@ -4,8 +4,10 @@ use bitmatch::bitmatch;
 use std::collections::HashMap;
 use tracing::{error, warn};
 
+mod arm_opcode_tests;
 mod arm_ops;
 mod arm_timing_tests;
+mod thumb_opcode_tests;
 mod thumb_ops;
 mod thumb_timing_tests;
 
