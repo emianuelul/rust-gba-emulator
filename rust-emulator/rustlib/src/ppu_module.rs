@@ -11,16 +11,12 @@ pub struct PPU {
 
 pub struct GBADisplay {
     screen: [u32; 240 * 160],
-    rot_scal: bool,
-    tilemap: bool,
 }
 
 impl GBADisplay {
     pub fn new() -> Self {
         GBADisplay {
             screen: [0; 240 * 160],
-            rot_scal: false,
-            tilemap: false,
         }
     }
 }

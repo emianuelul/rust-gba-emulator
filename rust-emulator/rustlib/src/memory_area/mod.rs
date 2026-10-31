@@ -4,7 +4,6 @@ mod writes;
 use crate::system_ctrl_registers::{IMC_ADDR, WAITCNT_ADDR};
 use crate::utility_fns::is_imc;
 use std::cell::Cell;
-use tracing::{error, warn};
 
 struct InternalMemory {
     bios: Vec<u8>, // 16Kb      0x00000000 - 0x00003FFF

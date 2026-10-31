@@ -1,34 +1,67 @@
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::gba_emulator::GBAEngine;
-
 pub mod constants;
 mod cpu;
 pub mod display_registers;
 mod display_test;
-pub mod gba_emulator;
 mod memory_area;
 pub mod ppu_module;
 pub mod register_macro;
 pub mod system_ctrl_registers;
 pub mod utility_fns;
 
+use crate::cpu::Cpu;
+use crate::memory_area::GBAMemory;
+use crate::ppu_module::PPU;
+
 #[wasm_bindgen]
-pub struct Emulator {
-    core: GBAEngine,
+pub struct GBAEngine {
+    memory: GBAMemory,
+    cpu: Cpu,
+    ppu: PPU,
+    pending_clk: u32,
 }
 
 #[wasm_bindgen]
-impl Emulator {
-    #[wasm_bindgen(constructor)]
-    pub fn new(rom: &[u8]) -> Self {
-        Self {
-            core: GBAEngine::new(rom.to_vec()),
-        }
-    }
+impl GBAEngine {
+    pub fn new(rom_data: Vec<u8>) -> Self {
+        let mut engine = GBAEngine {
+            memory: GBAMemory::new(rom_data),
+            cpu: Cpu::new(),
+            ppu: PPU::new(),
+            pending_clk: 0,
+        };
 
-    pub fn step(&mut self) {
-        self.core.step();
+        // init first 2 fetches
+        engine.pending_clk = engine
+            .cpu
+            .get_refill_clk(&engine.memory, engine.cpu.registers.pc);
+
+        engine
+    }
+}
+
+#[wasm_bindgen]
+pub struct Result {
+    pub draw: bool,
+    pub screen: [u32; 240 * 160],
+}
+
+#[wasm_bindgen]
+impl GBAEngine {
+    pub fn step(&mut self) -> Result {
+        let mut screen: [u32; 240 * 160] = [0; 240 * 160];
+        let mut draw = false;
+
+        let clk = std::mem::take(&mut self.pending_clk) + self.cpu.step(&mut self.memory);
+        if self.ppu.step(&mut self.memory, clk) {
+            //println!("====== DRAWING FRAME ======");
+            //println!("{:?}", self.ppu.get_frame());
+            draw = true;
+            screen = self.ppu.get_frame();
+        }
+
+        Result { draw, screen }
     }
 }
 

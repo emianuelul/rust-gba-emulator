@@ -37,7 +37,7 @@ pub fn get_field_bits(raw: u32, (start, len): (usize, usize)) -> u32 {
     let mut field_value: u32 = 0;
     for i in (0..len).rev() {
         let offset = start + i;
-        let bit = get_bit(raw, offset as usize);
+        let bit = get_bit(raw, offset);
         field_value = (field_value << 1) | (bit as u32);
     }
     field_value

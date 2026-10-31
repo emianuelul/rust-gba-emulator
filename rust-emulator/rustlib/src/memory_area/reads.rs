@@ -1,6 +1,6 @@
 use super::GBAMemory;
 use crate::utility_fns::{align16, align32, is_imc};
-use tracing::{error, warn};
+use tracing::error;
 
 // INTERNAL MEMORY READS
 impl GBAMemory {
