@@ -14,8 +14,6 @@ jobs:
 
     runs-on: ubuntu-latest
 
-
-
     steps:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
@@ -29,12 +27,7 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: wasm32-unknown-unknown
-    
+    steps:    
     - name: ARM Tests
       run: cd rust-emulator && cd rustlib && cargo test --lib cpu::arm_opcode_tests
     - name: THUMB Tests
