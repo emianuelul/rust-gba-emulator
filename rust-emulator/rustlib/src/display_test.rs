@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod test {
-    use crate::gba_emulator::GBAEngine;
+    use crate::GBAEngine;
 
     const LOG: tracing::Level = tracing::Level::DEBUG;
 
