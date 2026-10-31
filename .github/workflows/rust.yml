@@ -9,26 +9,27 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+defaults:
+  run:
+    working-directory: rust-emulator/rustlib
+
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: wasm32-unknown-unknown
-        
-    - name: Build
-      run: cd rust-emulator && cd rustlib && cargo build --verbose
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Build
+        run: cargo build --verbose
 
   opcode-tests:
-
     runs-on: ubuntu-latest
-
-    steps:    
-    - name: ARM Tests
-      run: cd rust-emulator && cd rustlib && cargo test --lib cpu::arm_opcode_tests
-    - name: THUMB Tests
-      run: cd rust-emulator && cd rustlib && cargo test --lib cpu::thumb_opcode_tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: ARM Tests
+        run: cargo test --lib cpu::arm_opcode_tests
+      - name: THUMB Tests
+        run: cargo test --lib cpu::thumb_opcode_tests
