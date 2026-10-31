@@ -14,8 +14,14 @@ jobs:
 
     runs-on: ubuntu-latest
 
+
+
     steps:
     - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+        
     - name: Build
       run: cd rust-emulator && cd rustlib && cargo build --verbose
 
@@ -24,6 +30,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+    
     - name: ARM Tests
       run: cd rust-emulator && cd rustlib && cargo test --lib cpu::arm_opcode_tests
     - name: THUMB Tests
