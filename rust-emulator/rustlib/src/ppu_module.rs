@@ -5,12 +5,12 @@ use crate::display_registers::{DISPSTAT, DISPSTAT_ADDR, VCOUNT, VCOUNT_ADDR};
 use crate::memory_area::GBAMemory;
 
 pub struct PPU {
-    display: GBADisplay,
+    pub display: GBADisplay,
     cycles: usize,
 }
 
 pub struct GBADisplay {
-    screen: [u32; 240 * 160],
+    pub screen: [u32; 240 * 160],
 }
 
 impl GBADisplay {
@@ -48,13 +48,15 @@ impl PPU {}
 
 impl PPU {
     fn convert_bgr555_hex(&self, bgr: u16) -> u32 {
-        let raw_bgr = u16::min(bgr, 2u16.pow(15));
+        let r = 0b11111 & bgr;
+        let g = 0b11111 & (bgr >> 5);
+        let b = 0b11111 & (bgr >> 10);
 
-        let r = ((0b11111 & raw_bgr) << 3) as u32;
-        let g = ((0b11111 & (raw_bgr >> 5)) << 3) as u32;
-        let b = ((0b11111 & (raw_bgr >> 10)) << 3) as u32;
+        let r8 = ((r << 3) | (r >> 2)) as u32;
+        let g8 = ((g << 3) | (g >> 2)) as u32;
+        let b8 = ((b << 3) | (b >> 2)) as u32;
 
-        (0xFF << 24) | (b << 16) | (g << 8) | r
+        (0xFF << 24) | (b8 << 16) | (g8 << 8) | r8
     }
 
     fn draw_scanline(&mut self, memory: &mut GBAMemory, scanline_index: u8) {

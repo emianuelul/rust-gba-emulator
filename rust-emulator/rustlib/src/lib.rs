@@ -24,6 +24,7 @@ pub struct GBAEngine {
 
 #[wasm_bindgen]
 impl GBAEngine {
+    #[wasm_bindgen(constructor)]
     pub fn new(rom_data: Vec<u8>) -> Self {
         let mut engine = GBAEngine {
             memory: GBAMemory::new(rom_data),
@@ -42,15 +43,15 @@ impl GBAEngine {
 }
 
 #[wasm_bindgen]
-pub struct Result {
-    pub draw: bool,
-    pub screen: [u32; 240 * 160],
+impl GBAEngine {
+    pub fn get_screen_pointer(&self) -> *const u32 {
+        self.ppu.display.screen.as_ptr()
+    }
 }
 
 #[wasm_bindgen]
 impl GBAEngine {
-    pub fn step(&mut self) -> Result {
-        let mut screen: [u32; 240 * 160] = [0; 240 * 160];
+    pub fn step(&mut self) -> bool {
         let mut draw = false;
 
         let clk = std::mem::take(&mut self.pending_clk) + self.cpu.step(&mut self.memory);
@@ -58,10 +59,9 @@ impl GBAEngine {
             //println!("====== DRAWING FRAME ======");
             //println!("{:?}", self.ppu.get_frame());
             draw = true;
-            screen = self.ppu.get_frame();
         }
 
-        Result { draw, screen }
+        draw
     }
 }
 
