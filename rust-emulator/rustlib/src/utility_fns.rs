@@ -42,3 +42,12 @@ pub fn get_field_bits(raw: u32, (start, len): (usize, usize)) -> u32 {
     }
     field_value
 }
+
+const LOG: tracing::Level = tracing::Level::DEBUG;
+
+pub fn init_tracing() {
+    let _ = tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(LOG)
+        .try_init();
+}

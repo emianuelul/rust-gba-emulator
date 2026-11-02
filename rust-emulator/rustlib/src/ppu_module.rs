@@ -1,7 +1,9 @@
 use crate::constants::{
-    HDRAW_CYCLES, HDRAW_PIXELS, SCANLINE_CYCLES, VBLANK_LINES, VDRAW_LINES, VRAM_START,
+    HDRAW_CYCLES, HDRAW_PIXELS, PRAM_START, SCANLINE_CYCLES, VBLANK_LINES, VDRAW_LINES, VRAM_START,
 };
-use crate::display_registers::{DISPSTAT, DISPSTAT_ADDR, VCOUNT, VCOUNT_ADDR};
+use crate::display_registers::{
+    DISPCNT, DISPCNT_ADDR, DISPSTAT, DISPSTAT_ADDR, VCOUNT, VCOUNT_ADDR,
+};
 use crate::memory_area::GBAMemory;
 
 pub struct PPU {
@@ -47,7 +49,7 @@ impl Default for PPU {
 impl PPU {}
 
 impl PPU {
-    fn convert_bgr555_hex(&self, bgr: u16) -> u32 {
+    fn convert_bgr555_rgba(&self, bgr: u16) -> u32 {
         let r = 0b11111 & bgr;
         let g = 0b11111 & (bgr >> 5);
         let b = 0b11111 & (bgr >> 10);
@@ -60,15 +62,59 @@ impl PPU {
     }
 
     fn draw_scanline(&mut self, memory: &mut GBAMemory, scanline_index: u8) {
-        // MODE 3 TO START
-        // MODE 3 - 15bit colors, no pallette ram
+        let dispcnt: DISPCNT = memory.read16(DISPCNT_ADDR).0.into();
 
-        for i in 0..(HDRAW_PIXELS as u32) {
-            let arr_index = (scanline_index as u32 * HDRAW_PIXELS as u32 + i) as usize;
-            let addr = VRAM_START + (arr_index as u32) * 2;
-            let pixel = memory.read16(addr).0;
+        match dispcnt.bg_mode {
+            0 => {
+                println!("BGM 0 not implemented")
+            }
 
-            self.display.screen[arr_index] = self.convert_bgr555_hex(pixel);
+            1 => {
+                println!("BGM 1 not implemented")
+            }
+
+            2 => {
+                println!("BGM 2 not implemented")
+            }
+
+            3 => {
+                // MODE 3 - 15bit colors, no pallette ram
+                for i in 0..(HDRAW_PIXELS as u32) {
+                    let arr_index = (scanline_index as u32 * HDRAW_PIXELS as u32 + i) as usize;
+                    let addr = VRAM_START + (arr_index as u32) * 2;
+                    let pixel = memory.read16(addr).0;
+
+                    self.display.screen[arr_index] = self.convert_bgr555_rgba(pixel);
+                }
+            }
+
+            4 => {
+                // MODE 4 - 8bit colors, 256/1 palette
+                let selected_frame_addr = if dispcnt.frame_select as u8 == 0 {
+                    // frame 0
+                    VRAM_START
+                } else {
+                    // frame 1
+                    VRAM_START + 0xA000
+                };
+
+                for i in 0..(HDRAW_PIXELS as u32) {
+                    let arr_index = (scanline_index as u32 * HDRAW_PIXELS as u32 + i) as usize;
+                    let addr = selected_frame_addr + (arr_index as u32);
+                    let pram_index = memory.read8(addr).0 as u32;
+                    let pixel = memory.read16(PRAM_START + pram_index * 2).0;
+
+                    self.display.screen[arr_index] = self.convert_bgr555_rgba(pixel);
+                }
+            }
+
+            5 => {
+                println!("BGM 5 not implemented")
+            }
+
+            _ => {
+                tracing::error!("Invalid background mode: {}", dispcnt.bg_mode);
+            }
         }
     }
 

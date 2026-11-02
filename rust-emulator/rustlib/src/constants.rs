@@ -19,3 +19,4 @@ pub const VDRAW_LINES: u8 = 160;
 pub const VBLANK_LINES: u8 = 68;
 
 pub const VRAM_START: u32 = 0x0600_0000;
+pub const PRAM_START: u32 = 0x0500_0000;

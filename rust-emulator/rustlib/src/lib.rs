@@ -13,6 +13,9 @@ pub mod utility_fns;
 use crate::cpu::Cpu;
 use crate::memory_area::GBAMemory;
 use crate::ppu_module::PPU;
+use std::sync::Once;
+
+static INIT: Once = Once::new();
 
 #[wasm_bindgen]
 pub struct GBAEngine {
@@ -25,13 +28,22 @@ pub struct GBAEngine {
 #[wasm_bindgen]
 impl GBAEngine {
     #[wasm_bindgen(constructor)]
-    pub fn new(rom_data: Vec<u8>) -> Self {
+    pub fn new(rom_data: Vec<u8>, debug: bool) -> Self {
         let mut engine = GBAEngine {
             memory: GBAMemory::new(rom_data),
             cpu: Cpu::new(),
             ppu: PPU::new(),
             pending_clk: 0,
         };
+
+        if debug {
+            INIT.call_once(|| {
+                tracing_wasm::set_as_global_default();
+                std::panic::set_hook(Box::new(|info| {
+                    tracing::error!("{info}");
+                }));
+            });
+        }
 
         // init first 2 fetches
         engine.pending_clk = engine
@@ -64,94 +76,3 @@ impl GBAEngine {
         draw
     }
 }
-
-//#[cfg(test)]
-//mod tests {
-//    use crate::cpu::Cpu;
-//    use crate::memory_area::GBAMemory;
-//    use std::collections::{HashSet, VecDeque};
-//
-//    const LOG: tracing::Level = tracing::Level::DEBUG;
-//
-//    fn init_tracing() {
-//        let _ = tracing_subscriber::fmt()
-//            .with_test_writer()
-//            .with_max_level(LOG)
-//            .try_init();
-//    }
-//
-//    #[test]
-//    fn cpu_tests() {
-//        init_tracing();
-//
-//        let test = 5;
-//
-//        let tests = [
-//            "/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_DataProcessing.gba",
-//            "/Users/iemi/Downloads/gba-tests/FuzzARM/ARM_Any.gba",
-//            "/Users/iemi/Downloads/gba-tests/FuzzARM/THUMB_Any.gba",
-//            "/Users/iemi/Downloads/gba-tests/FuzzARM/THUMB_DataProcessing.gba",
-//            "/Users/iemi/Downloads/gba-tests/gba-tests/thumb/thumb.gba",
-//            "/Users/iemi/Downloads/gba-tests/gba-tests/arm/arm.gba",
-//        ];
-//
-//        let rom = std::fs::read(tests[test]).expect("Test not found");
-//
-//        let mut mem = GBAMemory::new(rom);
-//        let mut cpu = Cpu::new();
-//
-//        let mut counter: u32 = 0;
-//
-//        let cap = 128;
-//        let mut last_few_pc: VecDeque<u32> = VecDeque::with_capacity(cap);
-//        let threshold = 10;
-//        let mut step: usize = 0;
-//        let window_count = 50;
-//
-//        loop {
-//            let _ = cpu.step(&mut mem);
-//            counter = counter.wrapping_add(1);
-//            step = step.wrapping_add(1);
-//
-//            let pc = cpu.get_register_value(15);
-//            last_few_pc.push_back(pc);
-//
-//            if last_few_pc.len() == cap {
-//                if step >= window_count {
-//                    step = 0;
-//                    let mut freq: HashSet<u32> = HashSet::new();
-//                    for &i in last_few_pc.iter() {
-//                        freq.insert(i);
-//                    }
-//
-//                    if freq.len() <= threshold {
-//                        println!("Detected loop, breaking...");
-//                        break;
-//                    }
-//                }
-//                last_few_pc.clear();
-//            }
-//
-//            if pc == 0x8001d4c {
-//                println!("gba-tests ended | R12 = {}", cpu.get_register_value(12));
-//                break;
-//            }
-//
-//            if counter == u32::MAX {
-//                println!("Ran too long, breaking...");
-//                break;
-//            }
-//        }
-//
-//        println!("Finished test \"{}\" after {} steps", tests[test], counter,);
-//        let mut freq: HashSet<u32> = HashSet::new();
-//        for &i in last_few_pc.iter() {
-//            freq.insert(i);
-//        }
-//
-//        println!("Last few PCs");
-//        for &i in freq.iter() {
-//            println!("PC = {:08X}", i)
-//        }
-//    }
-//}

@@ -5,6 +5,7 @@ const W = 240;
 const H = 160;
 const FRAME_MS = 1000 / 59.7275;
 const MAX_STEPS_PER_FRAME = 1_000_000;
+const DEBUG = false;
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -17,6 +18,7 @@ export default function App() {
 
   const [ready, setReady] = useState(false);
   const [romName, setRomName] = useState("");
+  const [paused, setPaused] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,12 +77,27 @@ export default function App() {
     engineRef.current = null;
 
     const rom = new Uint8Array(await file.arrayBuffer());
-    engineRef.current = new GBAEngine(rom);
+    engineRef.current = new GBAEngine(rom, DEBUG);
     setRomName(file.name);
+    setPaused(false);
 
     accRef.current = 0;
     lastRef.current = performance.now();
     rafRef.current = requestAnimationFrame(frame);
+  }
+
+  function togglePause() {
+    if (!engineRef.current) return;
+
+    if (paused) {
+      // reset timers so the time spent paused isn't "caught up" as a burst of frames
+      accRef.current = 0;
+      lastRef.current = performance.now();
+      rafRef.current = requestAnimationFrame(frame);
+    } else {
+      cancelAnimationFrame(rafRef.current);
+    }
+    setPaused(!paused);
   }
 
   return (
@@ -94,6 +111,13 @@ export default function App() {
       />
       <button disabled={!ready} onClick={() => fileRef.current?.click()}>
         {romName ? "Load another ROM" : "Select ROM"}
+      </button>
+      <button
+        disabled={!romName}
+        onClick={togglePause}
+        style={{ marginLeft: 12 }}
+      >
+        {paused ? "Resume" : "Pause"}
       </button>
       {romName && <span style={{ marginLeft: 12 }}>{romName}</span>}
 
