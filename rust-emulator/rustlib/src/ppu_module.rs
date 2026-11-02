@@ -2,7 +2,7 @@ use crate::constants::{
     HDRAW_CYCLES, HDRAW_PIXELS, PRAM_START, SCANLINE_CYCLES, VBLANK_LINES, VDRAW_LINES, VRAM_START,
 };
 use crate::display_registers::{
-    DISPCNT, DISPCNT_ADDR, DISPSTAT, DISPSTAT_ADDR, VCOUNT, VCOUNT_ADDR,
+    RegDispcnt, RegDispstat, RegVcount, DISPCNT_ADDR, DISPSTAT_ADDR, VCOUNT_ADDR,
 };
 use crate::memory_area::GBAMemory;
 
@@ -62,7 +62,7 @@ impl PPU {
     }
 
     fn draw_scanline(&mut self, memory: &mut GBAMemory, scanline_index: u8) {
-        let dispcnt: DISPCNT = memory.read16(DISPCNT_ADDR).0.into();
+        let dispcnt: RegDispcnt = memory.read16(DISPCNT_ADDR).0.into();
 
         match dispcnt.bg_mode {
             0 => {
@@ -128,8 +128,8 @@ impl PPU {
         let mut frame_ready: bool = false;
         self.cycles += clk as usize;
 
-        let mut dispstat: DISPSTAT = memory.read16(DISPSTAT_ADDR).0.into();
-        let mut vcount: VCOUNT = memory.read16(VCOUNT_ADDR).0.into();
+        let mut dispstat: RegDispstat = memory.read16(DISPSTAT_ADDR).0.into();
+        let mut vcount: RegVcount = memory.read16(VCOUNT_ADDR).0.into();
 
         // transition from HDRAW to HBLANK
         if self.cycles >= HDRAW_CYCLES as usize && !dispstat.hblank_flag {

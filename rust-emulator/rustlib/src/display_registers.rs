@@ -16,7 +16,7 @@ pub const DISPCNT_WINDOW0: (usize, usize) = (13, 1);
 pub const DISPCNT_WINDOW1: (usize, usize) = (14, 1);
 pub const DISPCNT_OBJ_WINDOW: (usize, usize) = (15, 1);
 register!(
-    DISPCNT: u16 {
+    RegDispcnt: u16 {
         bg_mode: u8 => DISPCNT_BG_MODE,
         cgb_mode: bool => DISPCNT_CGB_MODE,
         frame_select: bool => DISPCNT_FRAME_SELECT,
@@ -38,7 +38,7 @@ pub const GREENSWAP_ADDR: u32 = 0x04000002;
 pub const GREENSWAP_GREEN_SWAP_TOGGLE: (usize, usize) = (0, 1);
 
 register!(
-    GREENSWAP: u16 {
+    RegGreenswap: u16 {
          green_swap_toggle: bool => GREENSWAP_GREEN_SWAP_TOGGLE,
     }
 );
@@ -52,7 +52,7 @@ pub const DISPSTAT_HBLANK_IRQ_ENABLE: (usize, usize) = (4, 1);
 pub const DISPSTAT_VCOUNTER_IRQ_ENABLE: (usize, usize) = (5, 1);
 pub const DISPSTAT_VCOUNT_SETTING: (usize, usize) = (8, 8);
 register!(
-    DISPSTAT: u16 {
+    RegDispstat: u16 {
         vblank_flag: bool => DISPSTAT_VBLANK_FLAG,
         hblank_flag: bool => DISPSTAT_HBLANK_FLAG,
         vcounter_flag: bool => DISPSTAT_VCOUNTER_FLAG,
@@ -66,7 +66,7 @@ register!(
 pub const VCOUNT_ADDR: u32 = 0x04000006;
 pub const VCOUNT_CURRENT_SCANLINE: (usize, usize) = (0, 8);
 register!(
-    VCOUNT: u16 {
+    RegVcount: u16 {
          current_scanline: u8 => VCOUNT_CURRENT_SCANLINE,
     }
 );
@@ -80,7 +80,7 @@ pub const BGXCNT_SCREEN_BASE_BLOCK: (usize, usize) = (8, 5);
 pub const BGXCNT_DISPLAY_AREA_OVERFLOW: (usize, usize) = (13, 1);
 pub const BGXCNT_SCREEN_SIZE: (usize, usize) = (14, 2);
 register!(
-     BGXCNT: u16 {
+     RegBgxcnt: u16 {
          bg_priority: u8 => BGXCNT_BG_PRIORITY,
          char_base_block: u8 => BGXCNT_CHAR_BASE_BLOCK,
          mosaic: bool => BGXCNT_MOSAIC,
