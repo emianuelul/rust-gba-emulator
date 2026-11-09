@@ -2,7 +2,7 @@ use crate::constants::{
     HDRAW_CYCLES, HDRAW_PIXELS, PRAM_START, SCANLINE_CYCLES, VBLANK_LINES, VDRAW_LINES, VRAM_START,
 };
 use crate::display_registers::{
-    RegDispcnt, RegDispstat, RegVcount, DISPCNT_ADDR, DISPSTAT_ADDR, VCOUNT_ADDR,
+    DISPCNT_ADDR, DISPSTAT_ADDR, RegDispcnt, RegDispstat, RegVcount, VCOUNT_ADDR,
 };
 use crate::memory_area::GBAMemory;
 
@@ -109,7 +109,28 @@ impl PPU {
             }
 
             5 => {
-                println!("BGM 5 not implemented")
+                // MODE 5 - 16bit colors, 160x128, no pallette ram
+                let selected_frame_addr = if dispcnt.frame_select as u8 == 0 {
+                    // frame 0
+                    VRAM_START
+                } else {
+                    // frame 1
+                    VRAM_START + 0xA000
+                };
+
+                let row = scanline_index as usize * HDRAW_PIXELS as usize;
+                let backdrop = self.convert_bgr555_rgba(memory.read16(PRAM_START).0);
+
+                for i in 0..(HDRAW_PIXELS as u32) {
+                    let color = if i < 160 && scanline_index < 128 {
+                        let addr = selected_frame_addr + (scanline_index as u32 * 160 + i) * 2;
+                        self.convert_bgr555_rgba(memory.read16(addr).0)
+                    } else {
+                        backdrop
+                    };
+
+                    self.display.screen[row + i as usize] = color;
+                }
             }
 
             _ => {
