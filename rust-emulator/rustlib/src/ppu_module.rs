@@ -1,3 +1,4 @@
+use crate::bgmodes_draw::{bgm3_draw_scanline, bgm4_draw_scanline, bgm5_draw_scanline};
 use crate::constants::{
     HDRAW_CYCLES, HDRAW_PIXELS, PRAM_START, SCANLINE_CYCLES, VBLANK_LINES, VDRAW_LINES, VRAM_START,
 };
@@ -54,21 +55,30 @@ impl PPU {
         let dispcnt: RegDispcnt = memory.read16(DISPCNT_ADDR).0.into();
 
         match dispcnt.bg_mode {
-            0 => {
-                println!("BGM 0 not implemented")
+            0..=2 => {
+                // sprite modes
+                match dispcnt.bg_mode {
+                    0 => {
+                        println!("BGM 0 not implemented")
+                    }
+
+                    1 => {
+                        println!("BGM 1 not implemented")
+                    }
+
+                    2 => {
+                        println!("BGM 2 not implemented")
+                    }
+
+                    _ => {
+                        unreachable!()
+                    }
+                }
             }
 
-            1 => {
-                println!("BGM 1 not implemented")
-            }
+            3..=5 => {
+                // bitmap modes
 
-            2 => {
-                println!("BGM 2 not implemented")
-            }
-
-            3 => {}
-
-            4 => {
                 let selected_frame_addr = if dispcnt.frame_select as u8 == 0 {
                     // frame 0
                     VRAM_START
@@ -76,31 +86,23 @@ impl PPU {
                     // frame 1
                     VRAM_START + 0xA000
                 };
-            }
 
-            5 => {
-                // MODE 5 - 16bit colors, 160x128, no pallette ram
-                // layer 2
-                let selected_frame_addr = if dispcnt.frame_select as u8 == 0 {
-                    // frame 0
-                    VRAM_START
-                } else {
-                    // frame 1
-                    VRAM_START + 0xA000
+                let scanline = match dispcnt.bg_mode {
+                    3 => bgm3_draw_scanline(memory, scanline_index),
+
+                    4 => bgm4_draw_scanline(memory, scanline_index, selected_frame_addr),
+
+                    5 => bgm5_draw_scanline(memory, scanline_index, selected_frame_addr),
+
+                    _ => {
+                        unreachable!()
+                    }
                 };
-
-                let row = scanline_index as usize * HDRAW_PIXELS as usize;
-                let backdrop = self.convert_bgr555_rgba(memory.read16(PRAM_START).0);
 
                 for i in 0..(HDRAW_PIXELS as u32) {
-                    let color = if i < 160 && scanline_index < 128 {
-                        let addr = selected_frame_addr + (scanline_index as u32 * 160 + i) * 2;
-                        self.convert_bgr555_rgba(memory.read16(addr).0)
-                    } else {
-                        backdrop
-                    };
+                    let arr_index = (scanline_index as u32 * HDRAW_PIXELS as u32 + i) as usize;
 
-                    self.display.screen[row + i as usize] = color;
+                    self.display.screen[arr_index] = scanline[i as usize];
                 }
             }
 

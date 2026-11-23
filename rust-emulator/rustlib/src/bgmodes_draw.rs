@@ -24,7 +24,7 @@ pub fn bgm3_draw_scanline(memory: &mut GBAMemory, scanline_index: u8) -> [u32; 2
         let addr = VRAM_START + (arr_index as u32) * 2;
         let pixel = memory.read16(addr).0;
 
-        scanline[arr_index] = convert_bgr555_rgba(pixel);
+        scanline[i as usize] = convert_bgr555_rgba(pixel);
     }
 
     scanline
@@ -44,7 +44,7 @@ pub fn bgm4_draw_scanline(
         let pram_index = memory.read8(addr).0 as u32;
         let pixel = memory.read16(PRAM_START + pram_index * 2).0;
 
-        scanline[arr_index] = convert_bgr555_rgba(pixel);
+        scanline[i as usize] = convert_bgr555_rgba(pixel);
     }
 
     scanline
@@ -60,7 +60,6 @@ pub fn bgm5_draw_scanline(
 
     let mut scanline: [u32; 260] = [0; 260];
 
-    let row = scanline_index as usize * HDRAW_PIXELS as usize;
     let backdrop = convert_bgr555_rgba(memory.read16(PRAM_START).0);
 
     for i in 0..(HDRAW_PIXELS as u32) {
@@ -71,7 +70,7 @@ pub fn bgm5_draw_scanline(
             backdrop
         };
 
-        scanline[row + i as usize] = color;
+        scanline[i as usize] = color;
     }
 
     scanline
