@@ -2,8 +2,9 @@ use crate::constants::{
     HDRAW_CYCLES, HDRAW_PIXELS, PRAM_START, SCANLINE_CYCLES, VBLANK_LINES, VDRAW_LINES, VRAM_START,
 };
 use crate::display_registers::{
-    DISPCNT_ADDR, DISPSTAT_ADDR, RegDispcnt, RegDispstat, RegVcount, VCOUNT_ADDR,
+    RegDispcnt, RegDispstat, RegVcount, DISPCNT_ADDR, DISPSTAT_ADDR, VCOUNT_ADDR,
 };
+
 use crate::memory_area::GBAMemory;
 
 pub struct PPU {
@@ -49,18 +50,6 @@ impl Default for PPU {
 impl PPU {}
 
 impl PPU {
-    fn convert_bgr555_rgba(&self, bgr: u16) -> u32 {
-        let r = 0b11111 & bgr;
-        let g = 0b11111 & (bgr >> 5);
-        let b = 0b11111 & (bgr >> 10);
-
-        let r8 = ((r << 3) | (r >> 2)) as u32;
-        let g8 = ((g << 3) | (g >> 2)) as u32;
-        let b8 = ((b << 3) | (b >> 2)) as u32;
-
-        (0xFF << 24) | (b8 << 16) | (g8 << 8) | r8
-    }
-
     fn draw_scanline(&mut self, memory: &mut GBAMemory, scanline_index: u8) {
         let dispcnt: RegDispcnt = memory.read16(DISPCNT_ADDR).0.into();
 
@@ -77,19 +66,9 @@ impl PPU {
                 println!("BGM 2 not implemented")
             }
 
-            3 => {
-                // MODE 3 - 15bit colors, no pallette ram
-                for i in 0..(HDRAW_PIXELS as u32) {
-                    let arr_index = (scanline_index as u32 * HDRAW_PIXELS as u32 + i) as usize;
-                    let addr = VRAM_START + (arr_index as u32) * 2;
-                    let pixel = memory.read16(addr).0;
-
-                    self.display.screen[arr_index] = self.convert_bgr555_rgba(pixel);
-                }
-            }
+            3 => {}
 
             4 => {
-                // MODE 4 - 8bit colors, 256/1 palette
                 let selected_frame_addr = if dispcnt.frame_select as u8 == 0 {
                     // frame 0
                     VRAM_START
@@ -97,19 +76,11 @@ impl PPU {
                     // frame 1
                     VRAM_START + 0xA000
                 };
-
-                for i in 0..(HDRAW_PIXELS as u32) {
-                    let arr_index = (scanline_index as u32 * HDRAW_PIXELS as u32 + i) as usize;
-                    let addr = selected_frame_addr + (arr_index as u32);
-                    let pram_index = memory.read8(addr).0 as u32;
-                    let pixel = memory.read16(PRAM_START + pram_index * 2).0;
-
-                    self.display.screen[arr_index] = self.convert_bgr555_rgba(pixel);
-                }
             }
 
             5 => {
                 // MODE 5 - 16bit colors, 160x128, no pallette ram
+                // layer 2
                 let selected_frame_addr = if dispcnt.frame_select as u8 == 0 {
                     // frame 0
                     VRAM_START

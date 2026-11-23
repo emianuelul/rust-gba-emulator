@@ -1,4 +1,4 @@
-use crate::register;
+use crate::{memory_area::GBAMemory, register};
 
 pub const DISPCNT_ADDR: u32 = 0x04000000;
 pub const DISPCNT_BG_MODE: (usize, usize) = (0, 3);
@@ -91,11 +91,38 @@ register!(
     }
 );
 
+pub fn get_bgxcnt(memory: &GBAMemory, which: u8) -> RegBgxcnt {
+    if which > 3 {
+        panic!("Invalid BGXCNT: {}", which);
+    }
+    let addr = BGXCNT_ADDR + (2 * which as u32);
+
+    memory.read16(addr).0.into()
+}
+
 pub const BGXHOFS_ADDR: u32 = 0x04000010;
 pub const BGXVOFS_ADDR: u32 = 0x04000012;
 pub const BGXOFS_OFFSET: (usize, usize) = (0, 9);
 register!(
-    BGXOFS: u16 {
+    RegBgxofs: u16 {
         offset: u16 => BGXOFS_OFFSET,
     }
 );
+
+pub fn get_bgxhofs(memory: &GBAMemory, which: u8) -> RegBgxcnt {
+    if which > 3 {
+        panic!("Invalid BGXHOFS: {}", which);
+    }
+    let addr = BGXHOFS_ADDR + (4 * which as u32);
+
+    memory.read16(addr).0.into()
+}
+
+pub fn get_bgxvofs(memory: &GBAMemory, which: u8) -> RegBgxofs {
+    if which > 3 {
+        panic!("Invalid BGXVOFS: {}", which);
+    }
+    let addr = BGXVOFS_ADDR + (4 * which as u32);
+
+    memory.read16(addr).0.into()
+}

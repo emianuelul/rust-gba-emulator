@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::wasm_bindgen;
 
+mod bgmodes_draw;
 pub mod constants;
 mod cpu;
 pub mod display_registers;
