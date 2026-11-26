@@ -20,3 +20,5 @@ pub const VBLANK_LINES: u8 = 68;
 
 pub const VRAM_START: u32 = 0x0600_0000;
 pub const PRAM_START: u32 = 0x0500_0000;
+
+pub const KB: u32 = 1024;

@@ -1,9 +1,10 @@
 use crate::bgmodes_draw::{bgm3_draw_scanline, bgm4_draw_scanline, bgm5_draw_scanline};
 use crate::constants::{
-    HDRAW_CYCLES, HDRAW_PIXELS, PRAM_START, SCANLINE_CYCLES, VBLANK_LINES, VDRAW_LINES, VRAM_START,
+    HDRAW_CYCLES, HDRAW_PIXELS, KB, SCANLINE_CYCLES, VBLANK_LINES, VDRAW_LINES, VRAM_START,
 };
 use crate::display_registers::{
-    RegDispcnt, RegDispstat, RegVcount, DISPCNT_ADDR, DISPSTAT_ADDR, VCOUNT_ADDR,
+    get_bgxcnt, get_bgxhofs, get_bgxvofs, RegBgxcnt, RegBgxofs, RegDispcnt, RegDispstat, RegVcount,
+    DISPCNT_ADDR, DISPSTAT_ADDR, VCOUNT_ADDR,
 };
 
 use crate::memory_area::GBAMemory;
@@ -47,38 +48,64 @@ impl Default for PPU {
     }
 }
 
-// DISPCNT Handling
-impl PPU {}
+struct BGLayer {
+    cnt: RegBgxcnt,
+    xy: (u16, u16),
+    sc_addr: u32,
+}
 
 impl PPU {
     fn draw_scanline(&mut self, memory: &mut GBAMemory, scanline_index: u8) {
         let dispcnt: RegDispcnt = memory.read16(DISPCNT_ADDR).0.into();
 
+        // layers here, probabily just a variable width vector
+
         match dispcnt.bg_mode {
-            0..=2 => {
-                // sprite modes
-                match dispcnt.bg_mode {
-                    0 => {
-                        println!("BGM 0 not implemented")
+            // sprite modes
+            0..=2 => match dispcnt.bg_mode {
+                0 => {
+                    let active_layers: [u8; 4] = [0, 1, 2, 3];
+                    let mut layers: Vec<BGLayer> = Vec::new();
+                    for active_layer in active_layers {
+                        let cnt = get_bgxcnt(memory, active_layer);
+                        let xy = (
+                            get_bgxhofs(memory, active_layer).offset,
+                            get_bgxvofs(memory, active_layer).offset,
+                        );
+                        let sc_addr = VRAM_START + cnt.screen_base_block as u32 * 2 * KB;
+                        layers.push(BGLayer { cnt, xy, sc_addr });
                     }
 
-                    1 => {
-                        println!("BGM 1 not implemented")
+                    for layer in layers {
+                        // convert from screen space to map space
+                        // get position inside tile
+                        // get tile index
+                        // read tile data
+                        // convert from tile data to pixel data
                     }
 
-                    2 => {
-                        println!("BGM 2 not implemented")
-                    }
+                    // combine here for each scanline
+                    // convert from bgr
+                    // write to main scren buffer
 
-                    _ => {
-                        unreachable!()
-                    }
+                    println!("BGM 0 not implemented")
                 }
-            }
 
+                1 => {
+                    println!("BGM 1 not implemented")
+                }
+
+                2 => {
+                    println!("BGM 2 not implemented")
+                }
+
+                _ => {
+                    unreachable!()
+                }
+            },
+
+            // bitmap modes
             3..=5 => {
-                // bitmap modes
-
                 let selected_frame_addr = if dispcnt.frame_select as u8 == 0 {
                     // frame 0
                     VRAM_START

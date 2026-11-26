@@ -109,7 +109,7 @@ register!(
     }
 );
 
-pub fn get_bgxhofs(memory: &GBAMemory, which: u8) -> RegBgxcnt {
+pub fn get_bgxhofs(memory: &GBAMemory, which: u8) -> RegBgxofs {
     if which > 3 {
         panic!("Invalid BGXHOFS: {}", which);
     }
