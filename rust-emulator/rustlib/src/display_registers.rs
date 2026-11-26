@@ -126,3 +126,16 @@ pub fn get_bgxvofs(memory: &GBAMemory, which: u8) -> RegBgxofs {
 
     memory.read16(addr).0.into()
 }
+
+pub const BGMAP_TILEDATA_TILENUMBER: (usize, usize) = (0, 9);
+pub const BGMAP_TILEDATA_HFLIP: (usize, usize) = (10, 1);
+pub const BGMAP_TILEDATA_VLIP: (usize, usize) = (11, 1);
+pub const BGMAP_TILEDATA_PALETTE_NUMBER: (usize, usize) = (12, 4);
+register!(
+    RegTileData: u16 {
+        tile_number: u16 => BGMAP_TILEDATA_TILENUMBER,
+        hflip: bool => BGMAP_TILEDATA_HFLIP,
+        vflip: bool => BGMAP_TILEDATA_HFLIP,
+        palette_number: u16 => BGMAP_TILEDATA_PALETTE_NUMBER,
+    }
+);

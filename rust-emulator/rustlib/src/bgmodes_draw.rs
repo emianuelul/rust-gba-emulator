@@ -5,7 +5,7 @@ use crate::{
 
 // COLOR INDEX 0 IN PRAM IS CONSIDERED FULLY TRANSPARENT
 
-fn convert_bgr555_rgba(bgr: u16) -> u32 {
+pub fn convert_bgr555_rgba(bgr: u16) -> u32 {
     let r = 0b11111 & bgr;
     let g = 0b11111 & (bgr >> 5);
     let b = 0b11111 & (bgr >> 10);
